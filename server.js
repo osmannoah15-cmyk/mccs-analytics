@@ -7,10 +7,10 @@ const helmet = require('helmet');
 const session = require('express-session');
 const PgSession = require('connect-pg-simple')(session);
 
-const { pool, initSchema } = require('./src/db');
-const { router: authRouter, requireAuth, bootstrapAdmin } = require('./src/auth');
-const { router: apiRouter } = require('./src/routes/api');
-const aiRouter = require('./src/routes/ai');
+const { pool, initSchema } = require('./db');
+const { router: authRouter, requireAuth, bootstrapAdmin } = require('./auth');
+const { router: apiRouter } = require('./api');
+const aiRouter = require('./ai');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -75,16 +75,22 @@ app.use('/api/ai', aiRouter);
 // Pages
 app.get('/login', (req, res) => {
   if (req.session?.user) return res.redirect('/');
-  res.sendFile(path.join(__dirname, 'public', 'login.html'));
+  res.sendFile(path.join(__dirname, 'login.html'));
 });
 app.get('/', requireAuth, (_req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'app.html'));
+  res.sendFile(path.join(__dirname, 'app.html'));
 });
 
-// Static assets stay behind auth so the dashboard is not readable when logged out.
-app.use('/assets', requireAuth, express.static(path.join(__dirname, 'public'), { maxAge: isProd ? '1h' : 0 }));
-// The login page's own stylesheet must be reachable while logged out.
-app.use('/public', express.static(path.join(__dirname, 'public', 'css')));
+// Client assets.
+// Everything sits in one directory here, so each asset is served explicitly.
+// Never express.static(__dirname) in a flat layout: it would publish
+// server.js, db.js, and any .env sitting next to them.
+app.get('/app.css', (_req, res) => {
+  res.type('text/css').sendFile(path.join(__dirname, 'app.css'));
+});
+app.get('/client.js', requireAuth, (_req, res) => {
+  res.type('application/javascript').sendFile(path.join(__dirname, 'client.js'));
+});
 
 app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.path }));
 
@@ -101,13 +107,13 @@ async function start() {
     await bootstrapAdmin();
 
     if (process.env.AUTO_SEED === 'true') {
-      const { seed } = require('./src/seed/seed');
+      const { seed } = require('./seed');
       await seed();
     }
 
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`MCCS Revenue Intelligence listening on ${PORT}`);
-      console.log(`Ask Sage configured: ${require('./src/asksage').isConfigured()}`);
+      console.log(`Ask Sage configured: ${require('./asksage').isConfigured()}`);
     });
   } catch (e) {
     console.error('Startup failed:', e);

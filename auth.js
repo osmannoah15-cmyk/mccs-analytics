@@ -1,153 +1,187 @@
 'use strict';
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const rateLimit = require('express-rate-limit');
+const { q } = require('./db');
+
+const router = express.Router();
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts. Try again in 15 minutes.' }
+});
+
+/** Gate for page routes: bounce to the login screen. */
+function requireAuth(req, res, next) {
+  if (req.session && req.session.user) return next();
+  if (req.accepts('html') && !req.xhr && !req.path.startsWith('/api/')) {
+    return res.redirect('/login');
+  }
+  return res.status(401).json({ error: 'Not authenticated' });
+}
+
+/** Gate for API routes: always JSON. */
+function requireApiAuth(req, res, next) {
+  if (req.session && req.session.user) return next();
+  return res.status(401).json({ error: 'Not authenticated' });
+}
+
+function requireAdmin(req, res, next) {
+  if (req.session?.user?.role === 'admin') return next();
+  return res.status(403).json({ error: 'Administrator access required' });
+}
+
 /**
- * Ask Sage API client.
- *
- * Auth is two steps:
- *   1. POST {ASKSAGE_USER_BASE}/get-token-with-api-key  {email, api_key} -> access token
- *   2. POST {ASKSAGE_SERVER_BASE}/query with header  x-access-tokens: <token>
- *
- * The token is cached in memory and refreshed well before its 24h expiry.
- * The API key never leaves the server.
+ * Creates the first admin from env vars if the users table is empty.
+ * Lets you deploy without shelling into the database.
  */
+async function bootstrapAdmin() {
+  const { rows } = await q('SELECT COUNT(*)::int AS n FROM users');
+  if (rows[0].n > 0) return;
 
-const USER_BASE = (process.env.ASKSAGE_USER_BASE || 'https://api.asksage.ai/user').replace(/\/$/, '');
-const SERVER_BASE = (process.env.ASKSAGE_SERVER_BASE || 'https://api.asksage.ai/server').replace(/\/$/, '');
-const API_KEY = process.env.ASKSAGE_API_KEY || '';
-const EMAIL = process.env.ASKSAGE_EMAIL || '';
-const MODEL = process.env.ASKSAGE_MODEL || 'gpt-4.1-mini';
-const TEMPERATURE = Number(process.env.ASKSAGE_TEMPERATURE || 0.2);
-const TIMEOUT_MS = Number(process.env.ASKSAGE_TIMEOUT_MS || 45000);
+  const email = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = process.env.ADMIN_PASSWORD || '';
+  if (!email || !password) {
+    console.warn('No users exist and ADMIN_EMAIL / ADMIN_PASSWORD are not set. Set them and redeploy to create the first account.');
+    return;
+  }
+  if (password.length < 10) {
+    console.warn('ADMIN_PASSWORD is shorter than 10 characters. Choose a longer one.');
+  }
+  const hash = await bcrypt.hash(password, 12);
+  await q(
+    `INSERT INTO users (email, password_hash, full_name, role)
+     VALUES ($1,$2,$3,'admin') ON CONFLICT (email) DO NOTHING`,
+    [email, hash, process.env.ADMIN_NAME || 'Administrator']
+  );
+  console.log(`Bootstrapped admin account: ${email}`);
+}
 
-let cachedToken = null;
-let cachedAt = 0;
-const TOKEN_TTL_MS = 20 * 60 * 60 * 1000; // refresh at 20h, well inside the 24h expiry
+router.post('/login', loginLimiter, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
 
-const isConfigured = () => Boolean(API_KEY && EMAIL);
-
-async function fetchJson(url, options, timeoutMs = TIMEOUT_MS) {
-  const ctl = new AbortController();
-  const timer = setTimeout(() => ctl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { ...options, signal: ctl.signal });
-    const text = await res.text();
-    let json = null;
-    try { json = text ? JSON.parse(text) : null; } catch { /* non-JSON body */ }
-    if (!res.ok) {
-      const detail = (json && (json.message || json.error || json.detail)) || text.slice(0, 300);
-      throw new Error(`Ask Sage ${res.status}: ${detail}`);
-    }
-    return json;
-  } finally {
-    clearTimeout(timer);
+    const { rows } = await q(
+      'SELECT id, email, password_hash, full_name, role, is_active FROM users WHERE email = $1',
+      [email]
+    );
+    const user = rows[0];
+    // Same message either way so the form cannot be used to enumerate accounts.
+    const fail = () => res.status(401).json({ error: 'Invalid email or password' });
+    if (!user || !user.is_active) return fail();
+
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return fail();
+
+    await q('UPDATE users SET last_login_at = NOW() WHERE id = $1', [user.id]);
+
+    req.session.regenerate((err) => {
+      if (err) return res.status(500).json({ error: 'Session error' });
+      req.session.user = {
+        id: user.id,
+        email: user.email,
+        name: user.full_name || user.email,
+        role: user.role
+      };
+      req.session.save(() => res.json({ ok: true, user: req.session.user }));
+    });
+  } catch (e) {
+    console.error('login error', e);
+    res.status(500).json({ error: 'Login failed' });
   }
-}
+});
 
-async function getToken(force = false) {
-  if (!isConfigured()) throw new Error('Ask Sage is not configured (ASKSAGE_API_KEY / ASKSAGE_EMAIL missing)');
-  if (!force && cachedToken && Date.now() - cachedAt < TOKEN_TTL_MS) return cachedToken;
-
-  const json = await fetchJson(`${USER_BASE}/get-token-with-api-key`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify({ email: EMAIL, api_key: API_KEY })
-  }, 20000);
-
-  // Response shape has varied across Ask Sage versions, so probe the likely fields.
-  const token =
-    json?.response?.access_token ||
-    json?.access_token ||
-    json?.response ||
-    json?.token ||
-    (typeof json === 'string' ? json : null);
-
-  if (!token || typeof token !== 'string') {
-    throw new Error('Ask Sage token response did not contain an access token');
-  }
-  cachedToken = token;
-  cachedAt = Date.now();
-  return token;
-}
-
-/** Pull the assistant text out of whatever shape /server/query returns. */
-function extractMessage(json) {
-  if (!json) return '';
-  if (typeof json === 'string') return json;
-  const candidates = [
-    json.message,
-    json.response,
-    json?.response?.message,
-    json?.response?.response,
-    json?.data?.message,
-    json?.choices?.[0]?.message?.content
-  ];
-  for (const c of candidates) {
-    if (typeof c === 'string' && c.trim()) return c.trim();
-  }
-  // Last resort: a nested object with a string field named like a message.
-  if (typeof json.response === 'object' && json.response) {
-    for (const v of Object.values(json.response)) {
-      if (typeof v === 'string' && v.trim().length > 20) return v.trim();
-    }
-  }
-  return '';
-}
-
-/**
- * Send a grounded prompt to Ask Sage.
- * @param {string} message      user/query content
- * @param {object} opts         { system, model, temperature, dataset, persona }
- * @returns {Promise<{text:string, model:string, latencyMs:number}>}
- */
-async function query(message, opts = {}) {
-  const started = Date.now();
-  const model = opts.model || MODEL;
-  const system = opts.system || '';
-  const composed = system ? `${system}\n\n---\n\n${message}` : message;
-
-  const body = {
-    message: composed,
-    model,
-    temperature: opts.temperature != null ? opts.temperature : TEMPERATURE,
-    // 'none' keeps the model on the numbers we pass in rather than pulling
-    // in unrelated indexed content.
-    dataset: opts.dataset || 'none',
-    limit_references: 0,
-    live: 0
-  };
-  if (opts.persona != null) body.persona = opts.persona;
-
-  const send = async (token) => fetchJson(`${SERVER_BASE}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-access-tokens': token },
-    body: JSON.stringify(body)
+router.post('/logout', (req, res) => {
+  req.session.destroy(() => {
+    res.clearCookie('mccs.sid');
+    res.json({ ok: true });
   });
+});
 
-  let json;
+router.get('/me', requireApiAuth, (req, res) => res.json({ user: req.session.user }));
+
+/** Admin-only user management. */
+router.get('/users', requireApiAuth, requireAdmin, async (_req, res) => {
+  const { rows } = await q(
+    `SELECT id, email, full_name, role, is_active, created_at, last_login_at
+     FROM users ORDER BY created_at`
+  );
+  res.json({ users: rows });
+});
+
+router.post('/users', requireApiAuth, requireAdmin, async (req, res) => {
+  const email = String(req.body.email || '').trim().toLowerCase();
+  const password = String(req.body.password || '');
+  const fullName = String(req.body.full_name || '').trim();
+  const role = ['admin', 'analyst', 'viewer'].includes(req.body.role) ? req.body.role : 'viewer';
+
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+  if (password.length < 10) return res.status(400).json({ error: 'Password must be at least 10 characters' });
+
   try {
-    json = await send(await getToken());
-  } catch (err) {
-    // A stale/expired token shows up as 401/403. Refresh once and retry.
-    if (/401|403|token/i.test(err.message)) {
-      json = await send(await getToken(true));
-    } else {
-      throw err;
-    }
+    const hash = await bcrypt.hash(password, 12);
+    const { rows } = await q(
+      `INSERT INTO users (email, password_hash, full_name, role)
+       VALUES ($1,$2,$3,$4)
+       RETURNING id, email, full_name, role, is_active, created_at`,
+      [email, hash, fullName || null, role]
+    );
+    res.status(201).json({ user: rows[0] });
+  } catch (e) {
+    if (e.code === '23505') return res.status(409).json({ error: 'That email already exists' });
+    console.error(e);
+    res.status(500).json({ error: 'Could not create user' });
   }
+});
 
-  const text = extractMessage(json);
-  if (!text) throw new Error('Ask Sage returned an empty response');
-  return { text, model, latencyMs: Date.now() - started };
-}
+router.patch('/users/:id', requireApiAuth, requireAdmin, async (req, res) => {
+  const id = Number(req.params.id);
+  const sets = [];
+  const vals = [];
+  let i = 1;
 
-async function listModels() {
-  const token = await getToken();
-  const json = await fetchJson(`${SERVER_BASE}/get-models`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'x-access-tokens': token },
-    body: JSON.stringify({})
-  }, 20000);
-  const list = json?.response || json?.models || json;
-  return Array.isArray(list) ? list : [];
-}
+  if (req.body.role && ['admin', 'analyst', 'viewer'].includes(req.body.role)) {
+    sets.push(`role = $${i++}`); vals.push(req.body.role);
+  }
+  if (typeof req.body.is_active === 'boolean') {
+    sets.push(`is_active = $${i++}`); vals.push(req.body.is_active);
+  }
+  if (req.body.password) {
+    if (String(req.body.password).length < 10) {
+      return res.status(400).json({ error: 'Password must be at least 10 characters' });
+    }
+    sets.push(`password_hash = $${i++}`); vals.push(await bcrypt.hash(String(req.body.password), 12));
+  }
+  if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
 
-module.exports = { query, listModels, isConfigured, getToken, extractMessage };
+  vals.push(id);
+  const { rows } = await q(
+    `UPDATE users SET ${sets.join(', ')} WHERE id = $${i}
+     RETURNING id, email, full_name, role, is_active`,
+    vals
+  );
+  if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+  res.json({ user: rows[0] });
+});
+
+router.post('/change-password', requireApiAuth, async (req, res) => {
+  const current = String(req.body.current_password || '');
+  const next = String(req.body.new_password || '');
+  if (next.length < 10) return res.status(400).json({ error: 'New password must be at least 10 characters' });
+
+  const { rows } = await q('SELECT password_hash FROM users WHERE id = $1', [req.session.user.id]);
+  if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+  if (!(await bcrypt.compare(current, rows[0].password_hash))) {
+    return res.status(401).json({ error: 'Current password is incorrect' });
+  }
+  await q('UPDATE users SET password_hash = $1 WHERE id = $2',
+    [await bcrypt.hash(next, 12), req.session.user.id]);
+  res.json({ ok: true });
+});
+
+module.exports = { router, requireAuth, requireApiAuth, requireAdmin, bootstrapAdmin };

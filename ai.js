@@ -1,600 +1,313 @@
 'use strict';
-/**
- * All analytics run here, server-side, against rows loaded from Postgres.
- * The AI layer never computes numbers. It only narrates what this file produces,
- * which is what makes "grounded in computed metrics" a true statement.
- */
+const express = require('express');
+const rateLimit = require('express-rate-limit');
+const { q } = require('./db');
+const M = require('./metrics');
+const sage = require('./asksage');
+const { requireApiAuth } = require('./auth');
+const { loadSales, loadCampaigns, filtersFrom } = require('./api');
 
-const round = (n, d = 2) => {
-  const f = Math.pow(10, d);
-  return Math.round((Number(n) || 0) * f) / f;
-};
-const sum = (arr) => arr.reduce((a, b) => a + (Number(b) || 0), 0);
+const router = express.Router();
+router.use(requireApiAuth);
 
-/** ---------- Shaping ---------- */
+router.use(rateLimit({
+  windowMs: 60 * 1000,
+  max: Number(process.env.AI_RATE_LIMIT_PER_MIN || 20),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'AI request limit reached. Wait a moment and try again.' }
+}));
 
-/**
- * @param {Array} rows  [{period:'2026-06-01', installation, business_line, category, revenue, gross_margin, units}]
- */
-function monthsOf(rows) {
-  return [...new Set(rows.map((r) => r.period))].sort();
+const money = M.formatMoney;
+const pct = (n) => (n == null ? 'n/a' : `${n > 0 ? '+' : ''}${Number(n).toFixed(1)}%`);
+
+const SYSTEM = `You are the analytics assistant inside MCCS Revenue Intelligence, a decision-support tool for Marine Corps Community Services headquarters.
+
+Hard rules:
+- Use ONLY the metrics provided in the JSON payload. Never invent, estimate, or recall a number from anywhere else.
+- If the payload does not contain what is needed to answer, say so plainly and name what is missing.
+- Write for a senior government executive: direct, specific, no filler and no marketing tone.
+- Refer to money in the same rounded form the payload uses.
+- Do not use em dashes anywhere in your output.
+- Never claim data is real. This is a synthetic prototype dataset.
+
+Framing: MCCS measures itself against three enterprise objectives (leadership embrace, patron relevancy, resource efficiency) and four lines of effort (LOE 1 Innovate for Relevancy, LOE 2 Tell Our Story, LOE 3 Collaborate Effectively, LOE 4 Measure What Matters). When it is genuinely relevant, connect a finding to the objective or line of effort it informs. Do not force the connection.`;
+
+/** Records every call for auditability, then returns the payload. */
+async function logAi(userId, kind, prompt, response, engine, model, latency, ok, error) {
+  try {
+    await q(
+      `INSERT INTO ai_log (user_id, kind, prompt, response, model, engine, latency_ms, ok, error)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [userId, kind, String(prompt).slice(0, 8000), String(response || '').slice(0, 12000),
+       model || null, engine, latency || null, ok, error || null]
+    );
+  } catch (e) { console.warn('ai_log write failed:', e.message); }
 }
 
-function seriesFor(rows, months, metric = 'revenue') {
-  const idx = new Map(months.map((m, i) => [m, i]));
-  const out = new Array(months.length).fill(0);
-  for (const r of rows) {
-    const i = idx.get(r.period);
-    if (i == null) continue;
-    out[i] += Number(r[metric]) || 0;
+/**
+ * Runs a prompt through Ask Sage, falling back to a deterministic writer.
+ * The fallback is what keeps a live demo safe on a bad network.
+ */
+async function runAi({ req, kind, prompt, fallback }) {
+  const started = Date.now();
+  if (!sage.isConfigured()) {
+    const text = fallback();
+    await logAi(req.session.user.id, kind, prompt, text, 'builtin', null, Date.now() - started, true, 'not configured');
+    return { text, engine: 'builtin', note: 'Ask Sage is not configured, using the built-in metrics writer' };
   }
-  return out.map((v) => round(v, 2));
+  try {
+    const out = await sage.query(prompt, { system: SYSTEM });
+    await logAi(req.session.user.id, kind, prompt, out.text, 'asksage', out.model, out.latencyMs, true, null);
+    return { text: out.text, engine: 'asksage', model: out.model, latencyMs: out.latencyMs };
+  } catch (err) {
+    const text = fallback();
+    await logAi(req.session.user.id, kind, prompt, text, 'builtin', null, Date.now() - started, false, err.message);
+    console.warn(`Ask Sage call failed (${kind}):`, err.message);
+    return { text, engine: 'builtin', note: `Ask Sage unavailable: ${err.message}` };
+  }
 }
 
-/** ---------- Forecasting ---------- */
+async function digestFor(query) {
+  const filters = filtersFrom(query || {});
+  const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+  if (!sales.length) return null;
+  return M.buildDigest(sales, camps, filters);
+}
 
-/**
- * Seasonal index times linear trend, with an 80% interval from residual spread.
- * Same method as the original prototype, moved server-side and exposed with
- * the diagnostics an analyst would actually want to see.
- */
-function forecast(y, ahead = 3) {
-  const n = y.length;
-  if (n < 4) return { points: [], slope: 0, seasonalIndex: [], mape: null };
-  const monthOf = (i) => i % 12;
+/** ---------- Executive briefing ---------- */
+router.post('/brief', async (req, res, next) => {
+  try {
+    const d = await digestFor(req.body.filters);
+    if (!d) return res.status(400).json({ error: 'No data for those filters' });
 
-  const buckets = Array.from({ length: 12 }, () => []);
-  y.forEach((v, i) => buckets[monthOf(i)].push(v));
-  const overall = sum(y) / n;
-  const sIdx = buckets.map((a) => (a.length && overall ? sum(a) / a.length / overall : 1));
+    const prompt = `Write an executive briefing in five short paragraphs covering, in order:
+1. Latest month performance against the prior month and the same month last year.
+2. The three month forecast and what the forecast accuracy figure implies about confidence.
+3. Installation performance, naming the strongest and weakest.
+4. Promotion economics, including how much spend sits in campaigns that do not return their cost.
+5. The single highest value action to take next, with the dollar figure attached.
 
-  const deseason = y.map((v, i) => (sIdx[monthOf(i)] ? v / sIdx[monthOf(i)] : v));
-  const idx = [...Array(n).keys()];
-  const mx = sum(idx) / n;
-  const my = sum(deseason) / n;
-  let num = 0, den = 0;
-  idx.forEach((x, i) => { num += (x - mx) * (deseason[i] - my); den += (x - mx) ** 2; });
-  const slope = den ? num / den : 0;
-  const intercept = my - slope * mx;
+Metrics:
+${JSON.stringify(d, null, 1)}`;
 
-  const fitted = idx.map((i) => (intercept + slope * i) * sIdx[monthOf(i)]);
-  const resid = deseason.map((v, i) => v - (intercept + slope * i));
-  const sd = Math.sqrt(sum(resid.map((r) => r * r)) / n);
-
-  // In-sample MAPE gives the room a defensible accuracy statement.
-  const ape = y.map((v, i) => (v ? Math.abs(v - fitted[i]) / v : 0));
-  const mape = round((sum(ape) / n) * 100, 1);
-
-  const points = [];
-  for (let k = 0; k < ahead; k++) {
-    const i = n + k;
-    const s = sIdx[monthOf(i)];
-    const base = intercept + slope * i;
-    points.push({
-      step: k + 1,
-      value: round(base * s, 2),
-      low: round((base - 1.28 * sd) * s, 2),
-      high: round((base + 1.28 * sd) * s, 2)
+    const out = await runAi({
+      req, kind: 'brief', prompt, fallback: () => fallbackBrief(d)
     });
-  }
-  return { points, slope: round(slope, 2), seasonalIndex: sIdx.map((v) => round(v, 3)), mape, fitted };
-}
+    res.json({ ...out, digest: d });
+  } catch (e) { next(e); }
+});
 
-/** Add N months to a 'YYYY-MM-DD' string. */
-function addMonths(period, n) {
-  const [y, m] = period.split('-').map(Number);
-  const d = new Date(Date.UTC(y, m - 1 + n, 1));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-01`;
-}
+/** ---------- Ask the data ---------- */
+router.post('/ask', async (req, res, next) => {
+  try {
+    const question = String(req.body.question || '').trim();
+    if (!question) return res.status(400).json({ error: 'A question is required' });
+    if (question.length > 800) return res.status(400).json({ error: 'Question is too long' });
 
-/** ---------- Campaign economics ---------- */
+    const d = await digestFor(req.body.filters);
+    if (!d) return res.status(400).json({ error: 'No data for those filters' });
 
-function campaignMetrics(c) {
-  const spend = Number(c.spend) || 0;
-  const baseline = Number(c.baseline_revenue) || 0;
-  const promo = Number(c.promo_revenue) || 0;
-  const incrRevenue = promo - baseline;
-  const incrMargin = Number(c.incremental_margin) || 0;
-  const lift = baseline ? (incrRevenue / baseline) * 100 : 0;
-  const roi = spend ? ((incrMargin - spend) / spend) * 100 : 0;
-  return {
-    id: c.id,
-    code: c.code,
-    name: c.name,
-    channel: c.channel,
-    installation: c.installation,
-    businessLine: c.business_line,
-    startDate: c.start_date,
-    status: c.status,
-    spend: round(spend),
-    markdownPct: round(Number(c.markdown_pct) || 0, 1),
-    baselineRevenue: round(baseline),
-    promoRevenue: round(promo),
-    incrementalRevenue: round(incrRevenue),
-    incrementalMargin: round(incrMargin),
-    liftPct: round(lift, 1),
-    roiPct: round(roi, 1),
-    netMargin: round(incrMargin - spend),
-    profitable: incrMargin - spend > 0
-  };
-}
+    const prompt = `Answer the question below using only these metrics. Two to four sentences. Quote the specific figures that support the answer.
 
-function channelRollup(campaigns) {
-  const byCh = new Map();
-  for (const c of campaigns) {
-    if (!byCh.has(c.channel)) byCh.set(c.channel, { channel: c.channel, spend: 0, incrementalMargin: 0, count: 0 });
-    const b = byCh.get(c.channel);
-    b.spend += c.spend;
-    b.incrementalMargin += c.incrementalMargin;
-    b.count += 1;
-  }
-  return [...byCh.values()]
-    .map((b) => ({
-      ...b,
-      spend: round(b.spend),
-      incrementalMargin: round(b.incrementalMargin),
-      netMargin: round(b.incrementalMargin - b.spend),
-      roiPct: b.spend ? round(((b.incrementalMargin - b.spend) / b.spend) * 100, 1) : 0
-    }))
-    .sort((a, b) => a.roiPct - b.roiPct);
-}
+Question: ${question}
 
-/** ---------- Program / portfolio ROI (the LOE 1 view) ---------- */
+Metrics:
+${JSON.stringify(d, null, 1)}`;
 
-/**
- * Cost-to-serve proxy: for each business line we hold revenue, margin, margin rate,
- * trend, and promo efficiency together so leadership can make a
- * sustain / scale / sunset call per program.
- */
-function programPortfolio(rows, campaigns, months) {
-  const lines = [...new Set(rows.map((r) => r.business_line))];
-  const half = Math.max(1, Math.floor(months.length / 2));
-  const recentMonths = new Set(months.slice(-half));
-  const priorMonths = new Set(months.slice(0, half));
-
-  return lines.map((bl) => {
-    const lineRows = rows.filter((r) => r.business_line === bl);
-    const revenue = sum(lineRows.map((r) => r.revenue));
-    const margin = sum(lineRows.map((r) => r.gross_margin));
-    const units = sum(lineRows.map((r) => r.units));
-    const recent = sum(lineRows.filter((r) => recentMonths.has(r.period)).map((r) => r.revenue));
-    const prior = sum(lineRows.filter((r) => priorMonths.has(r.period)).map((r) => r.revenue));
-    const trendPct = prior ? ((recent - prior) / prior) * 100 : 0;
-
-    const lineCamps = campaigns.filter((c) => c.businessLine === bl);
-    const promoSpend = sum(lineCamps.map((c) => c.spend));
-    const promoMargin = sum(lineCamps.map((c) => c.incrementalMargin));
-    const promoRoi = promoSpend ? ((promoMargin - promoSpend) / promoSpend) * 100 : null;
-    const marginRate = revenue ? (margin / revenue) * 100 : 0;
-
-    // Simple, explainable decision rule. Every input is visible in the row.
-    let recommendation = 'Sustain';
-    if (trendPct > 6 && marginRate > 25) recommendation = 'Scale';
-    else if (trendPct < -3 || marginRate < 15) recommendation = 'Review';
-    if (trendPct < -8 && marginRate < 15) recommendation = 'Sunset candidate';
-
-    return {
-      businessLine: bl,
-      revenue: round(revenue),
-      margin: round(margin),
-      marginRatePct: round(marginRate, 1),
-      units,
-      revenuePerUnit: units ? round(revenue / units, 2) : 0,
-      trendPct: round(trendPct, 1),
-      promoSpend: round(promoSpend),
-      promoRoiPct: promoRoi == null ? null : round(promoRoi, 1),
-      campaignCount: lineCamps.length,
-      recommendation
-    };
-  }).sort((a, b) => b.revenue - a.revenue);
-}
-
-/** ---------- Installation performance ---------- */
-
-function installationRollup(rows, months) {
-  const half = Math.max(1, Math.floor(months.length / 2));
-  const recent = new Set(months.slice(-half));
-  const prior = new Set(months.slice(0, half));
-  const names = [...new Set(rows.map((r) => r.installation))];
-
-  return names.map((inst) => {
-    const iRows = rows.filter((r) => r.installation === inst);
-    const revenue = sum(iRows.map((r) => r.revenue));
-    const margin = sum(iRows.map((r) => r.gross_margin));
-    const rNow = sum(iRows.filter((r) => recent.has(r.period)).map((r) => r.revenue));
-    const rPrev = sum(iRows.filter((r) => prior.has(r.period)).map((r) => r.revenue));
-    return {
-      installation: inst,
-      revenue: round(revenue),
-      margin: round(margin),
-      marginRatePct: revenue ? round((margin / revenue) * 100, 1) : 0,
-      growthPct: rPrev ? round(((rNow - rPrev) / rPrev) * 100, 1) : 0
-    };
-  }).sort((a, b) => b.growthPct - a.growthPct);
-}
-
-/** ---------- Anomaly detection ---------- */
-
-/**
- * Flags movements that are unusual AFTER seasonality is removed.
- *
- * Without deseasonalizing, every installation trips the detector each January
- * simply because the holiday peak ended. That is a known pattern, not an
- * anomaly, and flagging it would discredit the whole panel. So each group's
- * series is divided by its own seasonal index first, and outliers are scored
- * on the deseasonalized month-over-month change.
- */
-function anomalies(rows, months, z = 2) {
-  const groups = new Map();
-  for (const r of rows) {
-    const key = `${r.installation}||${r.business_line}`;
-    if (!groups.has(key)) groups.set(key, new Map());
-    const g = groups.get(key);
-    g.set(r.period, (g.get(r.period) || 0) + (Number(r.revenue) || 0));
-  }
-
-  // Enterprise-wide seasonal index, used when a single group has too few
-  // observations to estimate its own reliably.
-  const totalByPeriod = months.map((m) =>
-    sum(rows.filter((r) => r.period === m).map((r) => r.revenue)));
-  const monthNum = (p) => Number(p.split('-')[1]) - 1;
-  const globalBuckets = Array.from({ length: 12 }, () => []);
-  months.forEach((m, i) => globalBuckets[monthNum(m)].push(totalByPeriod[i]));
-  const globalMean = sum(totalByPeriod) / (totalByPeriod.length || 1);
-  const globalIdx = globalBuckets.map((a) =>
-    a.length && globalMean ? sum(a) / a.length / globalMean : 1);
-
-  const found = [];
-  for (const [key, byPeriod] of groups) {
-    const [installation, businessLine] = key.split('||');
-    const vals = months.map((m) => byPeriod.get(m) || 0);
-    if (vals.filter(Boolean).length < 6) continue;
-
-    // Remove the seasonal shape before looking for surprises.
-    const adj = vals.map((v, i) => {
-      const s = globalIdx[monthNum(months[i])] || 1;
-      return s ? v / s : v;
+    const out = await runAi({
+      req, kind: 'ask', prompt, fallback: () => fallbackAnswer(question, d)
     });
+    res.json(out);
+  } catch (e) { next(e); }
+});
 
-    const deltas = [];
-    for (let i = 1; i < adj.length; i++) {
-      deltas.push(adj[i - 1] ? (adj[i] - adj[i - 1]) / adj[i - 1] : 0);
-    }
-    if (deltas.length < 5) continue;
+/** ---------- Per-campaign recommendation ---------- */
+router.post('/campaign/:id', async (req, res, next) => {
+  try {
+    const { rows } = await q('SELECT * FROM campaigns WHERE id = $1', [Number(req.params.id)]);
+    if (!rows[0]) return res.status(404).json({ error: 'Campaign not found' });
 
-    const mean = sum(deltas) / deltas.length;
-    const sd = Math.sqrt(sum(deltas.map((d) => (d - mean) ** 2)) / deltas.length);
-    if (!sd || sd < 0.005) continue;
+    const c = M.campaignMetrics(rows[0]);
+    const all = (await loadCampaigns({})).map(M.campaignMetrics);
+    const channels = M.channelRollup(all);
+    const peer = channels.find((x) => x.channel === c.channel);
+    const best = channels[channels.length - 1];
 
-    deltas.forEach((d, i) => {
-      const score = (d - mean) / sd;
-      if (Math.abs(score) < z) return;
-      const rawChange = vals[i] ? (vals[i + 1] - vals[i]) / vals[i] : 0;
-      found.push({
-        period: months[i + 1],
-        installation,
-        businessLine,
-        changePct: round(rawChange * 100, 1),
-        adjustedChangePct: round(d * 100, 1),
-        zScore: round(score, 2),
-        direction: d > 0 ? 'spike' : 'drop',
-        revenue: round(vals[i + 1]),
-        priorRevenue: round(vals[i]),
-        basis: 'seasonally adjusted'
-      });
+    const prompt = `Assess this single campaign and give a clear recommendation: continue, rework, or stop. Three or four sentences. Reference its ROI against its channel average and against the best performing channel.
+
+Campaign: ${JSON.stringify(c, null, 1)}
+Its channel overall: ${JSON.stringify(peer, null, 1)}
+Best channel overall: ${JSON.stringify(best, null, 1)}`;
+
+    const out = await runAi({
+      req, kind: 'campaign', prompt,
+      fallback: () => {
+        const verdict = c.roiPct >= 50 ? 'Continue and consider scaling.'
+          : c.roiPct >= 0 ? 'Continue, but rework the offer to lift margin.'
+          : 'Stop or rebuild. It is not returning its cost.';
+        return `${c.name} (${c.channel}, ${c.installation}) spent ${money(c.spend)} and produced ${money(c.incrementalMargin)} of incremental margin on ${pct(c.liftPct)} lift, for ${pct(c.roiPct)} ROI and a net of ${money(c.netMargin)}. Its channel averages ${pct(peer?.roiPct)} and the strongest channel is ${best?.channel} at ${pct(best?.roiPct)}. ${verdict}`;
+      }
     });
+    res.json({ ...out, campaign: c });
+  } catch (e) { next(e); }
+});
+
+/** ---------- Anomaly narrative ---------- */
+router.post('/anomalies', async (req, res, next) => {
+  try {
+    const d = await digestFor(req.body.filters);
+    if (!d) return res.status(400).json({ error: 'No data for those filters' });
+    if (!d.anomalies.length) return res.json({ text: 'No month over month movements exceeded two standard deviations in this selection.', engine: 'builtin' });
+
+    const prompt = `These are statistically unusual month over month movements. For the three most significant, explain in one sentence each what happened and what a manager should check first. Then give one sentence on whether the pattern looks seasonal or genuinely exceptional.
+
+Anomalies: ${JSON.stringify(d.anomalies, null, 1)}
+Seasonal context, monthly index: ${JSON.stringify(d.forecast, null, 1)}`;
+
+    const out = await runAi({
+      req, kind: 'anomalies', prompt,
+      fallback: () => d.anomalies.slice(0, 3).map((a) =>
+        `${a.installation} / ${a.businessLine} in ${a.period}: revenue ${a.direction === 'spike' ? 'rose' : 'fell'} ${pct(a.changePct)} to ${money(a.revenue)} from ${money(a.priorRevenue)}, ${Math.abs(a.zScore)} standard deviations from its own norm.`
+      ).join('\n\n')
+    });
+    res.json({ ...out, anomalies: d.anomalies });
+  } catch (e) { next(e); }
+});
+
+/** ---------- Scenario interpretation ---------- */
+router.post('/scenario', async (req, res, next) => {
+  try {
+    const filters = filtersFrom(req.body.filters || {});
+    const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+    if (!sales.length) return res.status(400).json({ error: 'No data for those filters' });
+
+    const months = M.monthsOf(sales);
+    const result = M.scenario(sales, months, camps.map(M.campaignMetrics), req.body.params || {});
+
+    const prompt = `Explain what this what-if scenario means for the next ${result.horizonMonths} months. Three sentences. State the margin impact in dollars, name the biggest single driver, and give one caution about what the model does not account for.
+
+Scenario: ${JSON.stringify(result, null, 1)}`;
+
+    const out = await runAi({
+      req, kind: 'scenario', prompt,
+      fallback: () => `This scenario moves projected margin by ${money(result.delta.margin)} and promotion net margin by ${money(result.delta.promoNetMargin)}, for a combined ${money(result.delta.total)} over ${result.horizonMonths} months. ${result.reallocNote || 'The change is driven by the demand and margin rate assumptions you set.'} The model holds cost structure and patron mix constant, so treat it as directional rather than a budget figure.`
+    });
+    res.json({ ...out, scenario: result });
+  } catch (e) { next(e); }
+});
+
+/** ---------- Scorecard narrative (the LOE 4 anchor) ---------- */
+router.post('/scorecard', async (req, res, next) => {
+  try {
+    const d = await digestFor(req.body.filters);
+    if (!d) return res.status(400).json({ error: 'No data for those filters' });
+
+    const prompt = `Write a short narrative for this enterprise scorecard. One paragraph per objective, each naming the KPIs that are on track and the ones that are not, and what would have to change to move an off-track KPI. Close with one sentence on overall measurement health.
+
+Scorecard: ${JSON.stringify(d.scorecard, null, 1)}
+Supporting programs: ${JSON.stringify(d.programs, null, 1)}`;
+
+    const out = await runAi({
+      req, kind: 'scorecard', prompt,
+      fallback: () => {
+        const s = d.scorecard;
+        const lines = s.objectives.map((o) => {
+          const off = o.kpis.filter((k) => !k.onTrack).map((k) => k.label);
+          return `${o.title}: ${o.kpis.length - off.length} of ${o.kpis.length} measures on track.${off.length ? ` Off track: ${off.join(', ')}.` : ''}`;
+        });
+        return `${lines.join('\n\n')}\n\nOverall measurement health is ${s.summary.healthPct}%, with ${s.summary.onTrack} of ${s.summary.kpiCount} KPIs on track.`;
+      }
+    });
+    res.json({ ...out, scorecard: d.scorecard });
+  } catch (e) { next(e); }
+});
+
+/** ---------- Status and audit ---------- */
+router.get('/status', async (_req, res) => {
+  const configured = sage.isConfigured();
+  if (!configured) return res.json({ configured: false, reachable: false, engine: 'builtin' });
+  try {
+    await sage.getToken();
+    res.json({ configured: true, reachable: true, engine: 'asksage', model: process.env.ASKSAGE_MODEL || 'gpt-4.1-mini' });
+  } catch (e) {
+    res.json({ configured: true, reachable: false, engine: 'builtin', error: e.message });
   }
-  return found.sort((a, b) => Math.abs(b.zScore) - Math.abs(a.zScore)).slice(0, 25);
+});
+
+router.get('/log', async (req, res, next) => {
+  try {
+    const { rows } = await q(
+      `SELECT l.id, l.kind, l.engine, l.model, l.latency_ms, l.ok, l.error, l.created_at, u.email
+       FROM ai_log l LEFT JOIN users u ON u.id = l.user_id
+       ORDER BY l.created_at DESC LIMIT 100`);
+    res.json({ entries: rows });
+  } catch (e) { next(e); }
+});
+
+/** ---------- Deterministic fallbacks ---------- */
+
+function fallbackBrief(d) {
+  const h = d.headline;
+  const top = d.installations[0];
+  const bottom = d.installations[d.installations.length - 1];
+  const worstCh = d.channels[0];
+  const bestCh = d.channels[d.channels.length - 1];
+  const opp = d.opportunities;
+
+  return `EXECUTIVE BRIEFING: ${d.coverage.latestPeriod}
+
+Revenue for the latest month was ${money(h.latestRevenue)}, ${pct(h.momPct)} against the prior month and ${pct(h.yoyPct)} year over year, at a ${h.latestMarginRatePct}% gross margin rate.
+
+The model projects ${money(d.forecast.total)} across the next three months, with in-sample error of ${d.forecast.mapePct}%. Monthly trend is ${d.forecast.monthlyTrend > 0 ? 'positive' : 'negative'} at ${money(Math.abs(d.forecast.monthlyTrend))} per month.
+
+${top.installation} leads growth at ${pct(top.growthPct)}. ${bottom.installation} trails at ${pct(bottom.growthPct)} and is the first place to look for underperformance.
+
+${d.campaigns.profitable} of ${d.campaigns.total} campaigns return their cost. ${money(d.campaigns.spendInNegativeRoi)} of spend sits in campaigns that do not. ${worstCh.channel} is the weakest channel at ${pct(worstCh.roiPct)} and ${bestCh.channel} is the strongest at ${pct(bestCh.roiPct)}.
+
+Recommended action: reallocate the ${money(d.campaigns.spendInNegativeRoi)} in negative-return campaigns toward ${bestCh.channel} and re-measure next cycle. Total addressable opportunity across the analysis is ${money(opp.totalAddressable)}.`;
 }
 
-/** ---------- Quantified opportunity (the ROI headline) ---------- */
+function fallbackAnswer(question, d) {
+  const s = question.toLowerCase();
+  const has = (...w) => w.some((x) => s.includes(x));
 
-/**
- * Turns the analysis into dollars. These are the numbers that justify the
- * engagement, so each one carries its own basis string.
- */
-function opportunities(campaigns, channels, installs, programs, forecastTotal) {
-  const losing = campaigns.filter((c) => !c.profitable);
-  const wastedSpend = sum(losing.map((c) => c.spend - c.incrementalMargin));
-  const bestChannel = channels[channels.length - 1];
-  const worstChannel = channels[0];
-
-  // Reallocation upside: move the losing spend to the best channel's ROI.
-  const reallocSpend = sum(losing.map((c) => c.spend));
-  const reallocUpside = bestChannel ? reallocSpend * (bestChannel.roiPct / 100) : 0;
-
-  // Margin-rate convergence: bring bottom-quartile installations up to median.
-  const rates = installs.map((i) => i.marginRatePct).sort((a, b) => a - b);
-  const median = rates.length ? rates[Math.floor(rates.length / 2)] : 0;
-  const laggards = installs.filter((i) => i.marginRatePct < median);
-  const convergenceUpside = sum(
-    laggards.map((i) => i.revenue * ((median - i.marginRatePct) / 100))
-  );
-
-  const items = [
-    {
-      key: 'wasted_promo_spend',
-      label: 'Promotion spend not returning its cost',
-      value: round(wastedSpend),
-      basis: `${losing.length} of ${campaigns.length} campaigns have incremental margin below spend`,
-      loe: 'LOE 1 - Innovate for Relevancy'
-    },
-    {
-      key: 'channel_reallocation',
-      label: 'Upside from reallocating losing spend to the best channel',
-      value: round(reallocUpside),
-      basis: bestChannel
-        ? `${formatMoney(reallocSpend)} currently in negative-ROI campaigns, moved to ${bestChannel.channel} at ${bestChannel.roiPct}% ROI`
-        : 'no channel data',
-      loe: 'LOE 1 - Innovate for Relevancy'
-    },
-    {
-      key: 'margin_convergence',
-      label: 'Margin upside if lagging installations reach the median rate',
-      value: round(convergenceUpside),
-      basis: `${laggards.length} installations below the ${round(median, 1)}% median margin rate`,
-      loe: 'LOE 3 - Collaborate Effectively'
-    },
-    {
-      key: 'forecast_visibility',
-      label: 'Revenue now under forward visibility',
-      value: round(forecastTotal),
-      basis: 'next three months projected with an 80% interval, previously unforecast',
-      loe: 'LOE 4 - Measure What Matters'
-    }
-  ];
-
-  const actionable = items
-    .filter((i) => ['wasted_promo_spend', 'channel_reallocation', 'margin_convergence'].includes(i.key))
-    .reduce((a, b) => a + b.value, 0);
-
-  return { items, totalAddressable: round(actionable) };
-}
-
-function formatMoney(n) {
-  const v = Number(n) || 0;
-  if (Math.abs(v) >= 1e6) return `$${(v / 1e6).toFixed(2)}M`;
-  if (Math.abs(v) >= 1e3) return `$${Math.round(v / 1e3)}K`;
-  return `$${Math.round(v)}`;
-}
-
-/** ---------- Enterprise scorecard (the LOE 4 anchor) ---------- */
-
-/**
- * Rolls program-level measures up to the three MCCS enterprise objectives.
- * This is the structural answer to "we lack the means to prove we are
- * meeting defined objectives".
- */
-function scorecard(rows, months, campaigns, installs, programs) {
-  const latest = months[months.length - 1];
-  const prev = months[months.length - 2];
-  const yearAgo = months.length >= 13 ? months[months.length - 13] : null;
-
-  const revAt = (m) => round(sum(rows.filter((r) => r.period === m).map((r) => r.revenue)));
-  const marAt = (m) => round(sum(rows.filter((r) => r.period === m).map((r) => r.gross_margin)));
-
-  const revLatest = revAt(latest);
-  const revPrev = prev ? revAt(prev) : 0;
-  const revYear = yearAgo ? revAt(yearAgo) : 0;
-  const marLatest = marAt(latest);
-
-  const profitable = campaigns.filter((c) => c.profitable).length;
-  const promoSpend = sum(campaigns.map((c) => c.spend));
-  const promoMargin = sum(campaigns.map((c) => c.incrementalMargin));
-  const blendedRoi = promoSpend ? ((promoMargin - promoSpend) / promoSpend) * 100 : 0;
-  const growing = installs.filter((i) => i.growthPct > 0).length;
-  const scaleReady = programs.filter((p) => p.recommendation === 'Scale').length;
-  const needsReview = programs.filter((p) => p.recommendation !== 'Sustain' && p.recommendation !== 'Scale').length;
-
-  const kpi = (label, value, unit, target, higherIsBetter = true) => {
-    const onTrack = higherIsBetter ? value >= target : value <= target;
-    return { label, value: round(value, 1), unit, target, onTrack };
-  };
-
-  const objectives = [
-    {
-      id: 'obj1',
-      title: 'Leadership will embrace MCCS',
-      note: 'Measured through decision-grade reporting coverage and evidence available to leadership',
-      kpis: [
-        kpi('Installations with current reporting', installs.length, 'count', installs.length),
-        kpi('Programs with a documented investment recommendation', programs.length, 'count', programs.length),
-        kpi('Months of history under measurement', months.length, 'months', 12)
-      ]
-    },
-    {
-      id: 'obj2',
-      title: 'MCCS will be relevant to Marines and families',
-      note: 'Patron demand as revealed by revenue, units, and promotion response',
-      kpis: [
-        kpi('Revenue, latest month', revLatest, 'usd', revPrev),
-        kpi('Month over month change', revPrev ? ((revLatest - revPrev) / revPrev) * 100 : 0, 'pct', 0),
-        kpi('Year over year change', revYear ? ((revLatest - revYear) / revYear) * 100 : 0, 'pct', 0),
-        kpi('Installations growing', growing, 'count', Math.ceil(installs.length / 2))
-      ]
-    },
-    {
-      id: 'obj3',
-      title: 'Resources aligned for efficient, sustainable service',
-      note: 'Margin performance and the return on promotional investment',
-      kpis: [
-        kpi('Gross margin rate', revLatest ? (marLatest / revLatest) * 100 : 0, 'pct', 25),
-        kpi('Blended promotion ROI', blendedRoi, 'pct', 0),
-        kpi('Campaigns returning their cost', campaigns.length ? (profitable / campaigns.length) * 100 : 0, 'pct', 70),
-        kpi('Programs flagged for review', needsReview, 'count', 0, false)
-      ]
-    }
-  ];
-
-  const all = objectives.flatMap((o) => o.kpis);
-  const onTrack = all.filter((k) => k.onTrack).length;
-
-  return {
-    latestPeriod: latest,
-    objectives,
-    summary: {
-      kpiCount: all.length,
-      onTrack,
-      offTrack: all.length - onTrack,
-      healthPct: all.length ? round((onTrack / all.length) * 100, 0) : 0,
-      scaleReady,
-      needsReview
-    }
-  };
-}
-
-/** ---------- What-if scenario ---------- */
-
-/**
- * Applies leadership-style levers to the current baseline and reports the delta.
- * Deliberately transparent arithmetic. Nothing here is a black box.
- */
-function scenario(rows, months, campaigns, params = {}) {
-  const {
-    demandShiftPct = 0,        // overall demand change
-    marginRateDeltaPts = 0,    // change in gross margin rate, percentage points
-    promoBudgetChangePct = 0,  // change to total promo spend
-    reallocateLosingSpend = false, // move negative-ROI spend to the best channel
-    horizonMonths = 3
-  } = params;
-
-  const revSeries = seriesFor(rows, months, 'revenue');
-  const marSeries = seriesFor(rows, months, 'gross_margin');
-  const f = forecast(revSeries, horizonMonths);
-  const baseForecast = sum(f.points.map((p) => p.value));
-
-  const baseRevenue = sum(revSeries);
-  const baseMargin = sum(marSeries);
-  const baseMarginRate = baseRevenue ? (baseMargin / baseRevenue) * 100 : 0;
-
-  const projRevenue = baseForecast * (1 + demandShiftPct / 100);
-  const projMarginRate = baseMarginRate + marginRateDeltaPts;
-  const projMargin = projRevenue * (projMarginRate / 100);
-  const baseForecastMargin = baseForecast * (baseMarginRate / 100);
-
-  const channels = channelRollup(campaigns);
-  const best = channels[channels.length - 1];
-  const losing = campaigns.filter((c) => !c.profitable);
-  const losingSpend = sum(losing.map((c) => c.spend));
-  const currentPromoSpend = sum(campaigns.map((c) => c.spend));
-  const currentPromoMargin = sum(campaigns.map((c) => c.incrementalMargin));
-
-  let promoSpend = currentPromoSpend * (1 + promoBudgetChangePct / 100);
-  let promoMargin = currentPromoMargin * (1 + promoBudgetChangePct / 100);
-  let reallocNote = null;
-  if (reallocateLosingSpend && best && losingSpend > 0) {
-    const recovered = sum(losing.map((c) => c.spend - c.incrementalMargin));
-    const redeployed = losingSpend * (1 + best.roiPct / 100);
-    promoMargin = promoMargin - sum(losing.map((c) => c.incrementalMargin)) + redeployed;
-    reallocNote = `${formatMoney(losingSpend)} moved from ${losing.length} negative-ROI campaigns into ${best.channel} at ${best.roiPct}% ROI, recovering ${formatMoney(recovered)} of loss`;
+  if (has('opportunity', 'roi', 'worth', 'value', 'save', 'saving')) {
+    const items = d.opportunities.items.map((i) => `${i.label}: ${money(i.value)} (${i.basis})`).join('. ');
+    return `Total addressable opportunity is ${money(d.opportunities.totalAddressable)}. ${items}.`;
   }
-
-  const baseNet = currentPromoMargin - currentPromoSpend;
-  const projNet = promoMargin - promoSpend;
-
-  return {
-    horizonMonths,
-    params,
-    baseline: {
-      forecastRevenue: round(baseForecast),
-      forecastMargin: round(baseForecastMargin),
-      marginRatePct: round(baseMarginRate, 1),
-      promoSpend: round(currentPromoSpend),
-      promoNetMargin: round(baseNet)
-    },
-    projected: {
-      forecastRevenue: round(projRevenue),
-      forecastMargin: round(projMargin),
-      marginRatePct: round(projMarginRate, 1),
-      promoSpend: round(promoSpend),
-      promoNetMargin: round(projNet)
-    },
-    delta: {
-      revenue: round(projRevenue - baseForecast),
-      margin: round(projMargin - baseForecastMargin),
-      promoNetMargin: round(projNet - baseNet),
-      total: round((projMargin - baseForecastMargin) + (projNet - baseNet))
-    },
-    reallocNote
-  };
+  if (has('scorecard', 'objective', 'measure', 'kpi', 'loe')) {
+    const sc = d.scorecard;
+    return `Measurement health is ${sc.summary.healthPct}%, with ${sc.summary.onTrack} of ${sc.summary.kpiCount} KPIs on track across the three enterprise objectives. ${sc.summary.scaleReady} programs are ready to scale and ${sc.summary.needsReview} need review.`;
+  }
+  if (has('program', 'portfolio', 'sunset', 'invest')) {
+    const p = d.programs;
+    const scale = p.filter((x) => x.recommendation === 'Scale').map((x) => x.businessLine);
+    const review = p.filter((x) => x.recommendation !== 'Sustain' && x.recommendation !== 'Scale').map((x) => x.businessLine);
+    return `Across ${p.length} programs, ${scale.length ? scale.join(' and ') + ' ' + (scale.length > 1 ? 'are' : 'is') + ' recommended to scale' : 'none are flagged to scale'}. ${review.length ? review.join(' and ') + ' ' + (review.length > 1 ? 'need' : 'needs') + ' review.' : 'No programs are flagged for review.'} The largest by revenue is ${p[0].businessLine} at ${money(p[0].revenue)} and a ${p[0].marginRatePct}% margin rate.`;
+  }
+  if (has('anomal', 'unusual', 'spike', 'drop', 'outlier')) {
+    if (!d.anomalies.length) return 'No movements exceeded two standard deviations in this selection.';
+    const a = d.anomalies[0];
+    return `The most significant movement is ${a.installation} / ${a.businessLine} in ${a.period}, ${a.direction === 'spike' ? 'up' : 'down'} ${pct(a.changePct)} to ${money(a.revenue)}, at ${a.zScore} standard deviations. ${d.anomalies.length} movements crossed the threshold in total.`;
+  }
+  if (has('channel')) {
+    const w = d.channels[0], b = d.channels[d.channels.length - 1];
+    return `${w.channel} is the weakest channel at ${pct(w.roiPct)} spend-weighted ROI across ${w.count} campaigns and ${money(w.spend)} of spend. ${b.channel} is the strongest at ${pct(b.roiPct)}.`;
+  }
+  if (has('install', 'grew', 'growth', 'base', 'fastest', 'slowest')) {
+    const t = d.installations[0], b = d.installations[d.installations.length - 1];
+    return `${t.installation} grew fastest at ${pct(t.growthPct)} comparing the recent half of the period to the earlier half. ${b.installation} is slowest at ${pct(b.growthPct)}. Across ${d.coverage.installations} installations, total revenue is ${money(d.headline.totalRevenue)}.`;
+  }
+  if (has('forecast', 'holiday', 'season', 'expect', 'next', 'project')) {
+    const periods = d.forecast.periods.map((p) => `${p.period}: ${money(p.value)}`).join(', ');
+    return `The three month projection totals ${money(d.forecast.total)} (${periods}), with in-sample error of ${d.forecast.mapePct}%. The seasonal pattern in the data puts the strongest months in November and December.`;
+  }
+  if (has('campaign', 'promo', 'worst', 'best')) {
+    const w = d.campaigns.worst[0], b = d.campaigns.best[0];
+    return `${d.campaigns.profitable} of ${d.campaigns.total} campaigns return their cost, on ${money(d.campaigns.totalSpend)} of total spend. Weakest is ${w.name} at ${pct(w.roiPct)} on ${money(w.spend)}. Strongest is ${b.name} at ${pct(b.roiPct)}.`;
+  }
+  return `Latest month revenue was ${money(d.headline.latestRevenue)} (${pct(d.headline.momPct)} month over month, ${pct(d.headline.yoyPct)} year over year), with ${d.campaigns.profitable} of ${d.campaigns.total} campaigns returning their cost and ${money(d.opportunities.totalAddressable)} of addressable opportunity identified. Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the scorecard for specifics.`;
 }
 
-/** ---------- The digest handed to the AI ---------- */
-
-/**
- * One compact, fully computed object. The AI receives only this, which is why
- * it cannot invent a number.
- */
-function buildDigest(rows, campaignRows, filters = {}) {
-  const months = monthsOf(rows);
-  const campaigns = campaignRows.map(campaignMetrics);
-  const revSeries = seriesFor(rows, months, 'revenue');
-  const marSeries = seriesFor(rows, months, 'gross_margin');
-  const f = forecast(revSeries, 3);
-  const installs = installationRollup(rows, months);
-  const programs = programPortfolio(rows, campaigns, months);
-  const channels = channelRollup(campaigns);
-  const anoms = anomalies(rows, months);
-  const forecastTotal = sum(f.points.map((p) => p.value));
-  const opps = opportunities(campaigns, channels, installs, programs, forecastTotal);
-  const card = scorecard(rows, months, campaigns, installs, programs);
-
-  const last = months[months.length - 1];
-  const prev = months[months.length - 2];
-  const yearAgo = months.length >= 13 ? months[months.length - 13] : null;
-  const at = (m) => (m ? round(sum(rows.filter((r) => r.period === m).map((r) => r.revenue))) : 0);
-
-  const revLast = at(last);
-  const revPrev = at(prev);
-  const revYear = at(yearAgo);
-
-  const sorted = [...campaigns].sort((a, b) => a.roiPct - b.roiPct);
-
-  return {
-    filters,
-    coverage: {
-      months: months.length,
-      firstPeriod: months[0],
-      latestPeriod: last,
-      installations: [...new Set(rows.map((r) => r.installation))].length,
-      businessLines: [...new Set(rows.map((r) => r.business_line))].length,
-      salesRows: rows.length,
-      campaigns: campaigns.length
-    },
-    headline: {
-      latestRevenue: revLast,
-      momPct: revPrev ? round(((revLast - revPrev) / revPrev) * 100, 1) : null,
-      yoyPct: revYear ? round(((revLast - revYear) / revYear) * 100, 1) : null,
-      latestMarginRatePct: revLast ? round((sum(rows.filter((r) => r.period === last).map((r) => r.gross_margin)) / revLast) * 100, 1) : null,
-      totalRevenue: round(sum(revSeries)),
-      totalMargin: round(sum(marSeries))
-    },
-    forecast: {
-      periods: f.points.map((p, i) => ({ period: addMonths(last, i + 1), ...p })),
-      total: round(forecastTotal),
-      mapePct: f.mape,
-      monthlyTrend: f.slope
-    },
-    installations: installs,
-    programs,
-    channels,
-    campaigns: {
-      total: campaigns.length,
-      profitable: campaigns.filter((c) => c.profitable).length,
-      totalSpend: round(sum(campaigns.map((c) => c.spend))),
-      spendInNegativeRoi: round(sum(campaigns.filter((c) => !c.profitable).map((c) => c.spend))),
-      worst: sorted.slice(0, 5),
-      best: sorted.slice(-5).reverse()
-    },
-    anomalies: anoms.slice(0, 8),
-    opportunities: opps,
-    scorecard: card
-  };
-}
-
-module.exports = {
-  monthsOf, seriesFor, forecast, addMonths,
-  campaignMetrics, channelRollup, programPortfolio, installationRollup,
-  anomalies, opportunities, scorecard, scenario, buildDigest,
-  formatMoney, round, sum
-};
+module.exports = router;

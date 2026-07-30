@@ -1,340 +1,355 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MCCS Revenue Intelligence</title>
-<link rel="stylesheet" href="/assets/css/app.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
-</head>
-<body>
-<div class="classbar">PROTOTYPE &middot; SYNTHETIC DATA ONLY &middot; NOT FOR OPERATIONAL USE</div>
+/* MCCS Revenue Intelligence
+   Design tokens carried forward from the original prototype so the deployed
+   app matches what has already been shown to stakeholders. */
 
-<header>
-  <div class="brand">
-    <div class="mark"><i></i><i></i><i></i></div>
-    <div>
-      <h1>MCCS Revenue Intelligence</h1>
-      <p id="coverageLine">Loading data coverage...</p>
-    </div>
-  </div>
-  <div class="userbox">
-    <div class="who">
-      <b id="userName">-</b>
-      <span id="userRole">-</span>
-    </div>
-    <button class="btn ghost sm" id="btnLogout">Sign out</button>
-  </div>
-</header>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-<nav>
-  <div class="seg" id="tabs">
-    <button data-v="scorecard" class="on">Scorecard</button>
-    <button data-v="sales">Sales &amp; forecast</button>
-    <button data-v="promo">Promotion ROI</button>
-    <button data-v="programs">Programs</button>
-    <button data-v="scenario">Scenario</button>
-    <button data-v="data">Data</button>
-    <button data-v="ai">AI analyst</button>
-    <button data-v="admin" id="tabAdmin" hidden>Admin</button>
-  </div>
-</nav>
+:root {
+  --bg: #FFFFFF; --surface: #F7F7F5; --card: #FFFFFF;
+  --border: #E6E6E2; --line: #EFEFEC;
+  --ink: #0B1419; --muted: #6E7681;
+  --accent: #F26207; --accent-dark: #D95700; --accent-soft: rgba(242, 98, 7, .08);
+  --blue: #2563EB; --green: #16A34A; --green-ink: #15803D;
+  --red: #DC2626; --red-ink: #B91C1C; --amber: #D97706;
+  --body: 'Inter', system-ui, -apple-system, sans-serif;
+  --mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(11, 20, 25, .04);
+}
 
-<main>
-  <!-- Global filters -->
-  <div class="controls">
-    <label for="fInst">Installation</label>
-    <select id="fInst"><option value="all">All installations</option></select>
-    <label for="fBL">Business line</label>
-    <select id="fBL"><option value="all">All business lines</option></select>
-    <label for="fFrom">From</label>
-    <select id="fFrom"><option value="">Earliest</option></select>
-    <label for="fTo">To</label>
-    <select id="fTo"><option value="">Latest</option></select>
-    <div class="spacer"></div>
-    <button class="btn ghost sm" id="btnReset">Reset filters</button>
-  </div>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body {
+  background: var(--bg); color: var(--ink);
+  font-family: var(--body); font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--accent-dark); }
 
-  <div class="kpis" id="kpis" style="margin-bottom:18px"></div>
+.classbar {
+  background: var(--surface); color: var(--muted); text-align: center;
+  font-family: var(--mono); font-size: 11px; letter-spacing: .08em;
+  padding: 6px 8px; border-bottom: 1px solid var(--border);
+}
 
-  <!-- ============ SCORECARD ============ -->
-  <section class="view on" id="v-scorecard">
-    <div class="grid">
-      <div class="card">
-        <h2>Enterprise measurement health
-          <span class="sub">KPIs on track across the three objectives</span></h2>
-        <div class="health">
-          <div class="big" id="healthPct">-</div>
-          <div class="meta" id="healthMeta">Computing...</div>
-        </div>
-        <div class="bar"><i id="healthBar" style="width:0%"></i></div>
-        <div class="hint">Every KPI below is derived from the sales and campaign data in this system. Nothing is entered by hand.</div>
-      </div>
-      <div class="card">
-        <h2>Portfolio signal</h2>
-        <div id="portfolioSignal"></div>
-      </div>
-    </div>
+/* ---------- Brand mark ---------- */
+.mark {
+  width: 38px; height: 38px; border-radius: 10px; background: var(--accent);
+  display: flex; align-items: flex-end; justify-content: center; gap: 3px;
+  padding-bottom: 9px; flex: none;
+}
+.mark i { display: block; width: 5px; background: #fff; border-radius: 2px; }
+.mark i:nth-child(1) { height: 9px; }
+.mark i:nth-child(2) { height: 16px; }
+.mark i:nth-child(3) { height: 12px; }
+.mark.lg { width: 52px; height: 52px; border-radius: 14px; padding-bottom: 12px; }
+.mark.lg i { width: 7px; }
+.mark.lg i:nth-child(1) { height: 12px; }
+.mark.lg i:nth-child(2) { height: 22px; }
+.mark.lg i:nth-child(3) { height: 16px; }
 
-    <div class="obj-grid" id="objGrid"></div>
+/* ---------- Login ---------- */
+.login-wrap {
+  min-height: 100vh; display: grid; grid-template-columns: 1.1fr 1fr;
+}
+@media (max-width: 860px) { .login-wrap { grid-template-columns: 1fr; } }
 
-    <div class="card">
-      <h2>Quantified opportunity
-        <span class="sub">What the analysis is worth, with the basis for each figure</span></h2>
-      <div class="opps" id="oppCards"></div>
-    </div>
+.login-side {
+  background: var(--surface); border-right: 1px solid var(--border);
+  padding: 48px 56px; display: flex; flex-direction: column; justify-content: space-between;
+}
+@media (max-width: 860px) { .login-side { display: none; } }
+.login-side h2 {
+  font-size: 30px; font-weight: 600; letter-spacing: -.03em;
+  line-height: 1.2; margin: 32px 0 14px; max-width: 15em;
+}
+.login-side p { color: var(--muted); font-size: 14.5px; line-height: 1.65; max-width: 34em; }
+.login-facts { display: flex; flex-direction: column; gap: 14px; margin-top: 34px; }
+.login-fact { border-left: 3px solid var(--accent); padding-left: 13px; }
+.login-fact .n { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.login-fact .d { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+.login-foot { color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .04em; }
 
-    <div class="card">
-      <h2>Scorecard narrative
-        <span class="sub"><span class="engine" id="engScore"><span class="dot"></span><span id="engScoreTxt">engine: checking</span></span></span></h2>
-      <button class="btn" id="btnScorecardAI">Generate narrative</button>
-      <div class="out" id="scorecardOut" style="margin-top:12px"><span class="placeholder">Generates a written assessment of each enterprise objective, naming which measures are on track and what would have to change to move the ones that are not.</span></div>
-    </div>
-  </section>
+.login-main { display: flex; align-items: center; justify-content: center; padding: 40px 28px; }
+.login-card { width: 100%; max-width: 380px; }
+.login-card h1 { font-size: 22px; font-weight: 600; letter-spacing: -.02em; margin-bottom: 5px; }
+.login-card .sub { color: var(--muted); font-size: 13.5px; margin-bottom: 26px; }
 
-  <!-- ============ SALES & FORECAST ============ -->
-  <section class="view" id="v-sales">
-    <div class="controls">
-      <div class="seg mini" id="metricSeg">
-        <button data-m="revenue" class="on">Revenue</button>
-        <button data-m="margin">Gross margin</button>
-      </div>
-    </div>
-    <div class="grid">
-      <div class="card">
-        <h2>Monthly performance <span class="sub">Actuals with a three month projection and 80% interval</span></h2>
-        <div class="legend">
-          <span><i class="sw" style="background:var(--accent)"></i>Actual</span>
-          <span><i class="sw" style="background:var(--blue)"></i>Forecast</span>
-          <span><i class="sw" style="background:rgba(37,99,235,.18)"></i>Interval</span>
-        </div>
-        <div class="chartbox"><canvas id="chartMain"></canvas></div>
-        <div class="hint" id="forecastNote"></div>
-      </div>
-      <div class="card">
-        <h2>Signal check</h2>
-        <div id="signals"></div>
-        <h2 style="margin-top:18px">Movers <span class="sub">Latest month vs prior</span></h2>
-        <div id="movers"></div>
-      </div>
-    </div>
+.field { margin-bottom: 15px; }
+.field label {
+  display: block; font-size: 12px; font-weight: 500; color: var(--muted);
+  margin-bottom: 6px; letter-spacing: .01em;
+}
+.field input {
+  width: 100%; background: #fff; border: 1px solid var(--border); border-radius: 10px;
+  padding: 11px 13px; font-family: var(--body); font-size: 14px; color: var(--ink);
+}
+.field input:hover { border-color: #CFCFCA; }
+.field input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 
-    <div class="card">
-      <h2>Installation heat <span class="sub">Each installation measured against its own average</span></h2>
-      <div class="tablewrap"><table id="heatTbl"></table></div>
-      <div class="hint">Orange means the month ran above that installation's own average, which keeps a large base from masking a small one.</div>
-    </div>
-  </section>
+.alert {
+  border-radius: 10px; padding: 10px 13px; font-size: 13px; margin-bottom: 15px;
+  border: 1px solid; line-height: 1.5;
+}
+.alert.err { background: rgba(220, 38, 38, .06); border-color: rgba(220, 38, 38, .25); color: var(--red-ink); }
+.alert.ok { background: rgba(22, 163, 74, .07); border-color: rgba(22, 163, 74, .25); color: var(--green-ink); }
+.alert.info { background: var(--surface); border-color: var(--border); color: var(--muted); }
+.alert[hidden] { display: none; }
 
-  <!-- ============ PROMOTION ROI ============ -->
-  <section class="view" id="v-promo">
-    <div class="controls">
-      <div class="fchips" id="chChips"></div>
-      <div class="spacer"></div>
-      <span class="hint" id="promoCount"></span>
-    </div>
-    <div class="grid even">
-      <div class="card">
-        <h2>Spend against return <span class="sub">Bubble size is incremental margin. Below the line loses money.</span></h2>
-        <div class="chartbox"><canvas id="chartScatter"></canvas></div>
-      </div>
-      <div class="card">
-        <h2>Channel economics <span class="sub">Spend-weighted ROI</span></h2>
-        <div class="chartbox"><canvas id="chartChannels"></canvas></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Campaign league table <span class="sub">Click a row for an AI assessment</span></h2>
-      <div class="tablewrap"><table id="campTbl"></table></div>
-      <div class="out" id="campOut" style="margin-top:14px" hidden></div>
-    </div>
-  </section>
+/* ---------- Buttons ---------- */
+.btn {
+  background: var(--accent); color: #fff; border: none; font-family: var(--body);
+  font-size: 13.5px; font-weight: 600; padding: 9px 18px; cursor: pointer; border-radius: 10px;
+}
+.btn:hover { background: var(--accent-dark); }
+.btn:disabled { opacity: .5; cursor: wait; }
+.btn:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.btn.full { width: 100%; padding: 11px 18px; }
+.btn.ghost { background: #fff; color: var(--ink); border: 1px solid var(--border); font-weight: 500; }
+.btn.ghost:hover { border-color: #CFCFCA; background: var(--surface); }
+.btn.sm { font-size: 12.5px; padding: 6px 12px; }
+.btn.danger { background: var(--red); }
+.btn.danger:hover { background: var(--red-ink); }
 
-  <!-- ============ PROGRAMS ============ -->
-  <section class="view" id="v-programs">
-    <div class="card">
-      <h2>Program portfolio <span class="sub">Sustain, scale, or sunset, with the evidence behind each call</span></h2>
-      <div class="tablewrap"><table id="progTbl"></table></div>
-      <div class="hint">Recommendation rule: scale when the trend exceeds 6% and margin rate exceeds 25%. Review when the trend is negative or margin rate falls below 15%. Every input is visible in the row, so the call can be challenged.</div>
-    </div>
-    <div class="grid even">
-      <div class="card">
-        <h2>Revenue by program</h2>
-        <div class="chartbox sm"><canvas id="chartPrograms"></canvas></div>
-      </div>
-      <div class="card">
-        <h2>Margin rate against trend <span class="sub">Upper right is healthy and growing</span></h2>
-        <div class="chartbox sm"><canvas id="chartProgScatter"></canvas></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Unusual movements <span class="sub">Month over month changes beyond two standard deviations</span></h2>
-      <button class="btn" id="btnAnomalies">Explain the anomalies</button>
-      <div class="out" id="anomOut" style="margin-top:12px"><span class="placeholder">Flags statistically unusual movements by installation and business line, then explains what a manager should check first.</span></div>
-      <div class="tablewrap" style="margin-top:14px"><table id="anomTbl"></table></div>
-    </div>
-  </section>
+/* ---------- App chrome ---------- */
+header {
+  display: flex; align-items: center; justify-content: space-between; gap: 20px;
+  flex-wrap: wrap; padding: 18px 32px; max-width: 1320px; margin: 0 auto;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand h1 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; line-height: 1.2; }
+.brand p { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
 
-  <!-- ============ SCENARIO ============ -->
-  <section class="view" id="v-scenario">
-    <div class="grid">
-      <div class="card">
-        <h2>Levers <span class="sub">Adjust and the projection recalculates</span></h2>
-        <div class="sliders">
-          <div class="slider">
-            <div class="top"><span class="lbl">Demand shift</span><span class="val" id="vDemand">0%</span></div>
-            <input type="range" id="sDemand" min="-30" max="30" value="0" step="1">
-            <div class="hint">Applies to projected revenue across the horizon.</div>
-          </div>
-          <div class="slider">
-            <div class="top"><span class="lbl">Gross margin rate change</span><span class="val" id="vMargin">0.0 pts</span></div>
-            <input type="range" id="sMargin" min="-10" max="10" value="0" step="0.5">
-            <div class="hint">Percentage points added to or removed from the current blended margin rate.</div>
-          </div>
-          <div class="slider">
-            <div class="top"><span class="lbl">Promotion budget change</span><span class="val" id="vPromo">0%</span></div>
-            <input type="range" id="sPromo" min="-50" max="50" value="0" step="5">
-            <div class="hint">Scales total promotion spend and its returns together.</div>
-          </div>
-          <label class="toggle">
-            <input type="checkbox" id="sRealloc">
-            <span>Move spend out of campaigns that do not return their cost</span>
-          </label>
-        </div>
-        <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
-          <button class="btn" id="btnRunScenario">Run scenario</button>
-          <button class="btn ghost" id="btnExplainScenario">Explain this scenario</button>
-          <button class="btn ghost" id="btnSaveScenario">Save</button>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Projected impact <span class="sub" id="scenHorizon">Next three months</span></h2>
-        <div class="delta-grid" id="deltaGrid">
-          <div class="empty">Set the levers and run the scenario.</div>
-        </div>
-        <div id="scenNote" class="hint"></div>
-        <div class="out" id="scenOut" style="margin-top:14px" hidden></div>
-      </div>
-    </div>
-    <div class="card">
-      <h2>Saved scenarios</h2>
-      <div class="tablewrap"><table id="scenTbl"></table></div>
-    </div>
-  </section>
+.userbox { display: flex; align-items: center; gap: 12px; font-size: 13px; }
+.userbox .who { text-align: right; line-height: 1.35; }
+.userbox .who b { font-weight: 600; }
+.userbox .who span {
+  display: block; color: var(--muted); font-family: var(--mono);
+  font-size: 10.5px; letter-spacing: .05em; text-transform: uppercase;
+}
 
-  <!-- ============ DATA ============ -->
-  <section class="view" id="v-data">
-    <div class="card">
-      <h2>Sales records
-        <span class="sub">Filter, sort, edit in place, add, import, or export</span></h2>
-      <div class="controls">
-        <input type="text" class="search" id="dataSearch" placeholder="Search installation or category">
-        <label for="pageSize">Rows</label>
-        <select id="pageSize">
-          <option>25</option><option selected>50</option><option>100</option><option>250</option>
-        </select>
-        <div class="spacer"></div>
-        <button class="btn ghost sm" id="btnAddRow">Add record</button>
-        <button class="btn ghost sm" id="btnImport">Import CSV</button>
-        <button class="btn ghost sm" id="btnExport">Export CSV</button>
-        <input type="file" id="fileInput" accept=".csv" hidden>
-      </div>
-      <div class="alert info" id="dataMsg" hidden></div>
-      <div class="tablewrap"><table id="dataTbl"></table></div>
-      <div class="pager">
-        <button class="btn ghost sm" id="pgPrev">Previous</button>
-        <span id="pgInfo"></span>
-        <button class="btn ghost sm" id="pgNext">Next</button>
-      </div>
-      <div class="hint" id="dataTotals"></div>
-    </div>
+nav { max-width: 1320px; margin: 0 auto; padding: 0 32px 16px; }
+.seg {
+  display: inline-flex; gap: 2px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 12px; padding: 3px; flex-wrap: wrap;
+}
+.seg button {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  font-family: var(--body); font-size: 13.5px; font-weight: 500;
+  padding: 8px 15px; cursor: pointer; border-radius: 9px;
+}
+.seg button:hover { color: var(--ink); }
+.seg button.on {
+  background: #fff; color: var(--ink); border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(11, 20, 25, .06); font-weight: 600;
+}
+.seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.seg.mini button { font-size: 12.5px; padding: 5px 12px; }
 
-    <div class="card" id="addCard" hidden>
-      <h2>Add a sales record</h2>
-      <div class="controls">
-        <select id="aPeriod"></select>
-        <select id="aInst"></select>
-        <select id="aCat"></select>
-        <input type="number" id="aRev" placeholder="Revenue" step="0.01">
-        <input type="number" id="aGm" placeholder="Gross margin" step="0.01">
-        <input type="number" id="aUnits" placeholder="Units">
-        <button class="btn sm" id="btnSaveRow">Save record</button>
-        <button class="btn ghost sm" id="btnCancelRow">Cancel</button>
-      </div>
-      <div class="hint">Adding a record for an existing period, installation, and category combination updates that record.</div>
-    </div>
+main { padding: 0 32px 56px; max-width: 1320px; margin: 0 auto; }
+.view { display: none; }
+.view.on { display: block; }
 
-    <div class="card">
-      <h2>Change history <span class="sub">Every edit, import, and deletion</span></h2>
-      <div class="tablewrap"><table id="auditTbl"></table></div>
-    </div>
-  </section>
+/* ---------- Controls ---------- */
+.controls { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.controls label { color: var(--muted); font-size: 12px; font-weight: 500; }
+.spacer { flex: 1; }
+select, .search, input[type="date"], input[type="month"], input[type="text"], input[type="number"] {
+  background: #fff; color: var(--ink); border: 1px solid var(--border);
+  padding: 8px 12px; font-family: var(--body); font-size: 13px; border-radius: 10px;
+}
+select { cursor: pointer; }
+select:hover, .search:hover { border-color: #CFCFCA; }
+select:focus-visible, .search:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-  <!-- ============ AI ANALYST ============ -->
-  <section class="view" id="v-ai">
-    <div class="ai-wrap">
-      <div class="card">
-        <h2>Executive briefing
-          <span class="sub"><span class="engine" id="engBrief"><span class="dot"></span><span id="engBriefTxt">engine: checking</span></span></span></h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" id="btnBrief">Generate briefing</button>
-          <button class="btn ghost" id="btnCopy" hidden>Copy</button>
-        </div>
-        <div class="out" id="briefOut" style="margin-top:12px"><span class="placeholder">Produces a five paragraph briefing covering the latest month, the forecast and its accuracy, installation performance, promotion economics, and the single highest value action with a dollar figure attached. Every number comes from the metrics computed in this system.</span></div>
-      </div>
+/* ---------- Cards and KPIs ---------- */
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 18px 20px; box-shadow: var(--shadow); margin-bottom: 16px;
+}
+.card h2 {
+  font-size: 15px; font-weight: 600; letter-spacing: -.01em; margin-bottom: 12px;
+  display: flex; justify-content: space-between; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.card h2 .sub { color: var(--muted); font-size: 12px; font-weight: 400; }
 
-      <div class="card">
-        <h2>Ask the data <span class="sub">Grounded in computed metrics, nothing invented</span></h2>
-        <div class="chat" id="chat">
-          <div class="msg ai">Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the enterprise scorecard. Answers carry the figures that support them, and each one names the engine that produced it.</div>
-        </div>
-        <div class="askrow">
-          <input type="text" class="search" id="askInput" placeholder="Ask a question about this data">
-          <button class="btn" id="btnAsk">Ask</button>
-        </div>
-        <div class="chips" id="chips">
-          <button>Which installation grew fastest?</button>
-          <button>Which channel has the worst ROI?</button>
-          <button>Where is the biggest opportunity?</button>
-          <button>Which programs should we scale?</button>
-          <button>What should we expect next quarter?</button>
-        </div>
-      </div>
-    </div>
-  </section>
+.kpis { display: flex; gap: 10px; flex-wrap: wrap; }
+.kpi {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 10px 14px; min-width: 142px;
+}
+.kpi .v { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.kpi .v small { font-size: 12px; font-weight: 500; margin-left: 5px; color: var(--muted); }
+.kpi .l {
+  color: var(--muted); font-size: 10.5px; font-family: var(--mono);
+  letter-spacing: .04em; margin-top: 2px;
+}
 
-  <!-- ============ ADMIN ============ -->
-  <section class="view" id="v-admin">
-    <div class="card">
-      <h2>Users</h2>
-      <div class="controls">
-        <input type="email" id="nuEmail" placeholder="Email">
-        <input type="text" id="nuName" placeholder="Full name">
-        <input type="password" id="nuPass" placeholder="Password (10+ characters)">
-        <select id="nuRole">
-          <option value="viewer">Viewer</option>
-          <option value="analyst">Analyst</option>
-          <option value="admin">Admin</option>
-        </select>
-        <button class="btn sm" id="btnAddUser">Add user</button>
-      </div>
-      <div class="alert info" id="userMsg" hidden></div>
-      <div class="tablewrap"><table id="userTbl"></table></div>
-      <div class="hint">Viewers can read everything. Analysts can also edit data. Admins can manage accounts.</div>
-    </div>
-    <div class="card">
-      <h2>AI call log <span class="sub">Every request, which engine answered, and how long it took</span></h2>
-      <div class="tablewrap"><table id="aiLogTbl"></table></div>
-    </div>
-  </section>
-</main>
+.grid { display: grid; grid-template-columns: 2.1fr 1fr; gap: 16px; }
+.grid.even { grid-template-columns: 1fr 1fr; }
+.grid.thirds { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1000px) { .grid, .grid.even, .grid.thirds { grid-template-columns: 1fr; } }
 
-<div id="tip" role="tooltip"></div>
-<div class="foot">
-  <span>MCCS Revenue Intelligence &middot; synthetic dataset &middot; Dexian Government Solutions</span>
-  <span>Forecast: seasonal index times linear trend &middot; AI narrates computed metrics only</span>
-</div>
+.chartbox { position: relative; height: 330px; }
+.chartbox.sm { height: 270px; }
+.legend { display: flex; gap: 16px; font-size: 11.5px; color: var(--muted); margin-bottom: 6px; flex-wrap: wrap; }
+.legend .sw { display: inline-block; width: 16px; height: 3px; vertical-align: middle; margin-right: 5px; border-radius: 2px; }
 
-<script src="/assets/js/app.js"></script>
-</body>
-</html>
+.sideline { border-left: 3px solid var(--border); padding-left: 12px; margin-bottom: 14px; }
+.sideline .n { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
+.sideline .d { color: var(--muted); font-size: 12.5px; margin-top: 1px; }
+.sideline.up { border-color: var(--green); }
+.sideline.down { border-color: var(--red); }
+.sideline.warn { border-color: var(--amber); }
+
+/* ---------- Tables ---------- */
+.tablewrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  font-size: 11px; font-family: var(--mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--muted); text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border);
+  cursor: pointer; white-space: nowrap; user-select: none; position: sticky; top: 0; background: #fff; z-index: 1;
+}
+th.plain { cursor: default; }
+th:hover:not(.plain) { color: var(--accent); }
+td {
+  padding: 9px 10px; border-bottom: 1px solid var(--line);
+  font-family: var(--mono); font-size: 12.5px; vertical-align: middle;
+}
+td.name { font-family: var(--body); font-size: 13px; font-weight: 500; }
+td.name span { font-weight: 400; color: var(--muted); font-size: 11.5px; }
+td input {
+  width: 100%; max-width: 120px; font-family: var(--mono); font-size: 12.5px;
+  padding: 4px 7px; border-radius: 7px;
+}
+.chip { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
+.chip.win { background: rgba(22, 163, 74, .1); color: var(--green-ink); }
+.chip.lose { background: rgba(220, 38, 38, .08); color: var(--red-ink); }
+.chip.warn { background: rgba(217, 119, 6, .1); color: var(--amber); }
+.chip.neutral { background: var(--surface); color: var(--muted); }
+.win { color: var(--green-ink); }
+.lose { color: var(--red-ink); }
+
+.fchips { display: flex; gap: 6px; flex-wrap: wrap; }
+.fchips button {
+  background: #fff; border: 1px solid var(--border); color: var(--muted);
+  font-size: 12px; padding: 5px 11px; cursor: pointer; border-radius: 999px; font-family: var(--body);
+}
+.fchips button:hover { border-color: var(--accent); color: var(--accent); }
+.fchips button.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-dark); font-weight: 500; }
+
+/* ---------- Scorecard ---------- */
+.obj-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+@media (max-width: 1000px) { .obj-grid { grid-template-columns: 1fr; } }
+.obj { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; box-shadow: var(--shadow); }
+.obj .eyebrow {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--accent-dark); margin-bottom: 6px;
+}
+.obj h3 { font-size: 15px; font-weight: 600; letter-spacing: -.01em; line-height: 1.35; margin-bottom: 4px; }
+.obj .note { color: var(--muted); font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+.kpirow {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 0; border-bottom: 1px solid var(--line);
+}
+.kpirow:last-child { border-bottom: 0; }
+.kpirow .kl { font-size: 12.5px; line-height: 1.4; }
+.kpirow .kv { font-family: var(--mono); font-size: 13px; font-weight: 500; white-space: nowrap; display: flex; align-items: center; gap: 7px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.dot.ok { background: var(--green); }
+.dot.off { background: var(--red); }
+
+.health {
+  display: flex; align-items: center; gap: 14px; padding: 4px 0 2px;
+}
+.health .big { font-size: 34px; font-weight: 600; letter-spacing: -.03em; line-height: 1; }
+.health .meta { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+.bar { height: 7px; background: var(--surface); border-radius: 999px; overflow: hidden; margin-top: 10px; }
+.bar > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; }
+
+/* ---------- Opportunity cards ---------- */
+.opps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+@media (max-width: 1100px) { .opps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 620px) { .opps { grid-template-columns: 1fr; } }
+.opp {
+  border: 1px solid var(--border); border-radius: 12px; padding: 14px 15px; background: var(--card);
+}
+.opp .v { font-size: 22px; font-weight: 600; letter-spacing: -.02em; color: var(--accent-dark); }
+.opp .l { font-size: 12.5px; font-weight: 500; margin-top: 4px; line-height: 1.4; }
+.opp .b { color: var(--muted); font-size: 11.5px; margin-top: 6px; line-height: 1.5; }
+.opp .loe {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .05em; color: var(--muted);
+  margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--line);
+}
+
+/* ---------- Scenario ---------- */
+.sliders { display: flex; flex-direction: column; gap: 18px; }
+.slider .top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 7px; }
+.slider .top .lbl { font-size: 13px; font-weight: 500; }
+.slider .top .val { font-family: var(--mono); font-size: 13px; color: var(--accent-dark); font-weight: 500; }
+.slider input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
+.slider .hint { color: var(--muted); font-size: 11.5px; margin-top: 5px; line-height: 1.45; }
+.toggle { display: flex; align-items: center; gap: 9px; font-size: 13px; cursor: pointer; }
+.toggle input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+
+.delta-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+@media (max-width: 700px) { .delta-grid { grid-template-columns: 1fr; } }
+.delta { border: 1px solid var(--border); border-radius: 12px; padding: 13px 15px; }
+.delta .l { color: var(--muted); font-family: var(--mono); font-size: 10.5px; letter-spacing: .04em; }
+.delta .v { font-size: 21px; font-weight: 600; letter-spacing: -.02em; margin-top: 3px; }
+.delta .c { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+/* ---------- AI ---------- */
+.ai-wrap { display: grid; grid-template-columns: 1fr 1.1fr; gap: 16px; }
+@media (max-width: 1000px) { .ai-wrap { grid-template-columns: 1fr; } }
+.engine {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--mono);
+  font-size: 11px; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 999px; padding: 4px 10px;
+}
+.engine .dot { width: 7px; height: 7px; border-radius: 50%; background: #C4C8CC; }
+.engine.live .dot { background: var(--green); }
+.engine.offline .dot { background: var(--accent); }
+.out {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px 16px; min-height: 200px; font-size: 13.5px; line-height: 1.7; white-space: pre-wrap;
+}
+.out .placeholder { color: var(--muted); }
+.skel {
+  height: 12px; border-radius: 6px; margin: 9px 0;
+  background: linear-gradient(90deg, #ECECE9 25%, #F7F7F5 50%, #ECECE9 75%);
+  background-size: 200% 100%; animation: sh 1.3s infinite;
+}
+@keyframes sh { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+@media (prefers-reduced-motion: reduce) { .skel { animation: none; } }
+
+.chat { display: flex; flex-direction: column; gap: 10px; max-height: 400px; overflow-y: auto; padding-right: 4px; }
+.msg { border-radius: 12px; padding: 10px 13px; font-size: 13.5px; line-height: 1.65; max-width: 92%; }
+.msg.me { background: var(--accent-soft); border: 1px solid rgba(242, 98, 7, .2); align-self: flex-end; }
+.msg.ai { background: var(--surface); border: 1px solid var(--border); align-self: flex-start; }
+.msg .src { display: block; font-family: var(--mono); font-size: 10.5px; color: var(--muted); margin-top: 7px; letter-spacing: .04em; }
+.askrow { display: flex; gap: 8px; margin-top: 12px; }
+.askrow input { flex: 1; }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+.chips button {
+  background: #fff; border: 1px solid var(--border); color: var(--muted);
+  font-size: 12px; padding: 5px 11px; cursor: pointer; border-radius: 999px; font-family: var(--body);
+}
+.chips button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ---------- Misc ---------- */
+.hint { color: var(--muted); font-size: 11px; font-family: var(--mono); margin-top: 8px; }
+.pager { display: flex; align-items: center; gap: 10px; justify-content: flex-end; margin-top: 12px; font-size: 12.5px; color: var(--muted); }
+.foot {
+  display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+  max-width: 1320px; margin: 0 auto; padding: 20px 32px 40px;
+  color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .03em;
+  border-top: 1px solid var(--line);
+}
+#tip {
+  position: fixed; pointer-events: none; background: #0B1419; color: #fff; border-radius: 8px;
+  padding: 8px 11px; font-size: 12px; line-height: 1.5; z-index: 50; display: none; max-width: 260px;
+  box-shadow: 0 4px 14px rgba(11, 20, 25, .25);
+}
+#tip .t { font-family: var(--mono); font-size: 10.5px; color: #9CA3AF; letter-spacing: .05em; }
+.empty { color: var(--muted); font-size: 13px; padding: 26px 4px; text-align: center; line-height: 1.6; }
+[hidden] { display: none !important; }

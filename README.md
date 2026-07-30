@@ -39,24 +39,24 @@ Two things matter here:
 2. **The Ask Sage key never reaches the browser.** All AI calls are proxied through the server. If Ask Sage is unreachable, a deterministic built in writer produces the same content from the same metrics, and the interface shows which engine answered. A demo will not die on a bad network.
 
 ```
-├── server.js              Express app, sessions, routing
-├── render.yaml            Render blueprint
-├── src/
-│   ├── db.js              Postgres pool and schema
-│   ├── auth.js            Login, roles, user management
-│   ├── asksage.js         Ask Sage client with token caching
-│   ├── metrics.js         All analytics: forecast, ROI, scorecard, anomalies, scenarios
-│   ├── routes/api.js      Data and analytics endpoints
-│   ├── routes/ai.js       AI endpoints with fallbacks
-│   └── seed/
-│       ├── dataset.json   The synthetic dataset
-│       └── seed.js        Loads it into Postgres
-└── public/
-    ├── login.html
-    ├── app.html
-    ├── css/app.css
-    └── js/app.js
+server.js       Express app, sessions, routing
+db.js           Postgres pool and schema
+auth.js         Login, roles, user management
+asksage.js      Ask Sage client with token caching
+metrics.js      All analytics: forecast, ROI, scorecard, anomalies, scenarios
+api.js          Data and analytics endpoints
+ai.js           AI endpoints with fallbacks
+seed.js         Loads the dataset into Postgres
+dataset.json    The synthetic dataset
+login.html      Sign in page
+app.html        Dashboard
+app.css         Styles for both pages
+client.js       Dashboard logic (browser)
+package.json
+render.yaml
 ```
+
+Every file sits at the repo root. There are no subfolders, so `require` paths are all `./name`. The browser script is named `client.js` rather than `app.js` to keep it clearly separate from the server modules sitting beside it.
 
 **Roles.** Viewer reads everything. Analyst can also edit data. Admin can manage accounts and see the AI call log.
 
@@ -66,15 +66,20 @@ Two things matter here:
 
 ### 1. Put the files in your repo
 
+All 16 files go at the root of the repo, side by side. No subfolders.
+
 ```bash
 cd your-repo
-# copy the contents of this folder in, then:
+ls        # server.js, db.js, auth.js, ... package.json should all be here
 git add .
 git commit -m "MCCS Revenue Intelligence app"
 git push origin main
 ```
 
-Confirm `.gitignore` is present and that `node_modules/` and `.env` are not committed.
+Two things to confirm before pushing:
+
+- `package.json` is at the repo root, not inside a folder. Render looks for it there and the build fails if it is nested.
+- `.gitignore` is present, so `node_modules/` and `.env` are never committed.
 
 ### 2. Create the Postgres database on Render
 
@@ -160,7 +165,7 @@ Admin tab, add each person with the **viewer** role. Viewers can explore everyth
 ```bash
 npm install
 cp .env.example .env      # fill in DATABASE_URL and the Ask Sage values
-npm run seed              # load the synthetic dataset
+npm run seed              # load the synthetic dataset (runs seed.js)
 npm run dev               # http://localhost:3000
 ```
 
@@ -203,7 +208,7 @@ Export first to get a correctly shaped template.
 
 **No data anywhere.** `AUTO_SEED` was not `true` on first boot. Set it and redeploy, or open a Render shell and run `npm run seed`.
 
-**Charts do not render.** Chart.js loads from a CDN. If your network blocks `cdnjs.cloudflare.com`, download `chart.umd.min.js` into `public/js/` and change the script tag in `app.html` to point at `/assets/js/chart.umd.min.js`. Worth doing anyway if you might present from a restricted network.
+**Charts do not render.** Chart.js loads from a CDN. If your network blocks `cdnjs.cloudflare.com`, download `chart.umd.min.js` next to the other files and add a route for it in `server.js` alongside the `/client.js` route, then point the script tag in `app.html` at it. Worth doing anyway if you might present from a restricted network.
 
 **A campaign edit does not change the scorecard.** Refresh the filters or reload. The analytics payload is fetched per filter change.
 

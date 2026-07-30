@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MCCS Revenue Intelligence</title>
+<link rel="stylesheet" href="/app.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+</head>
+<body>
+<div class="classbar">PROTOTYPE &middot; SYNTHETIC DATA ONLY &middot; NOT FOR OPERATIONAL USE</div>
+
+<header>
+  <div class="brand">
+    <div class="mark"><i></i><i></i><i></i></div>
+    <div>
+      <h1>MCCS Revenue Intelligence</h1>
+      <p id="coverageLine">Loading data coverage...</p>
+    </div>
+  </div>
+  <div class="userbox">
+    <div class="who">
+      <b id="userName">-</b>
+      <span id="userRole">-</span>
+    </div>
+    <button class="btn ghost sm" id="btnLogout">Sign out</button>
+  </div>
+</header>
+
+<nav>
+  <div class="seg" id="tabs">
+    <button data-v="scorecard" class="on">Scorecard</button>
+    <button data-v="sales">Sales &amp; forecast</button>
+    <button data-v="promo">Promotion ROI</button>
+    <button data-v="programs">Programs</button>
+    <button data-v="scenario">Scenario</button>
+    <button data-v="data">Data</button>
+    <button data-v="ai">AI analyst</button>
+    <button data-v="admin" id="tabAdmin" hidden>Admin</button>
+  </div>
+</nav>
+
+<main>
+  <!-- Global filters -->
+  <div class="controls">
+    <label for="fInst">Installation</label>
+    <select id="fInst"><option value="all">All installations</option></select>
+    <label for="fBL">Business line</label>
+    <select id="fBL"><option value="all">All business lines</option></select>
+    <label for="fFrom">From</label>
+    <select id="fFrom"><option value="">Earliest</option></select>
+    <label for="fTo">To</label>
+    <select id="fTo"><option value="">Latest</option></select>
+    <div class="spacer"></div>
+    <button class="btn ghost sm" id="btnReset">Reset filters</button>
+  </div>
+
+  <div class="kpis" id="kpis" style="margin-bottom:18px"></div>
+
+  <!-- ============ SCORECARD ============ -->
+  <section class="view on" id="v-scorecard">
+    <div class="grid">
+      <div class="card">
+        <h2>Enterprise measurement health
+          <span class="sub">KPIs on track across the three objectives</span></h2>
+        <div class="health">
+          <div class="big" id="healthPct">-</div>
+          <div class="meta" id="healthMeta">Computing...</div>
+        </div>
+        <div class="bar"><i id="healthBar" style="width:0%"></i></div>
+        <div class="hint">Every KPI below is derived from the sales and campaign data in this system. Nothing is entered by hand.</div>
+      </div>
+      <div class="card">
+        <h2>Portfolio signal</h2>
+        <div id="portfolioSignal"></div>
+      </div>
+    </div>
+
+    <div class="obj-grid" id="objGrid"></div>
+
+    <div class="card">
+      <h2>Quantified opportunity
+        <span class="sub">What the analysis is worth, with the basis for each figure</span></h2>
+      <div class="opps" id="oppCards"></div>
+    </div>
+
+    <div class="card">
+      <h2>Scorecard narrative
+        <span class="sub"><span class="engine" id="engScore"><span class="dot"></span><span id="engScoreTxt">engine: checking</span></span></span></h2>
+      <button class="btn" id="btnScorecardAI">Generate narrative</button>
+      <div class="out" id="scorecardOut" style="margin-top:12px"><span class="placeholder">Generates a written assessment of each enterprise objective, naming which measures are on track and what would have to change to move the ones that are not.</span></div>
+    </div>
+  </section>
+
+  <!-- ============ SALES & FORECAST ============ -->
+  <section class="view" id="v-sales">
+    <div class="controls">
+      <div class="seg mini" id="metricSeg">
+        <button data-m="revenue" class="on">Revenue</button>
+        <button data-m="margin">Gross margin</button>
+      </div>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h2>Monthly performance <span class="sub">Actuals with a three month projection and 80% interval</span></h2>
+        <div class="legend">
+          <span><i class="sw" style="background:var(--accent)"></i>Actual</span>
+          <span><i class="sw" style="background:var(--blue)"></i>Forecast</span>
+          <span><i class="sw" style="background:rgba(37,99,235,.18)"></i>Interval</span>
+        </div>
+        <div class="chartbox"><canvas id="chartMain"></canvas></div>
+        <div class="hint" id="forecastNote"></div>
+      </div>
+      <div class="card">
+        <h2>Signal check</h2>
+        <div id="signals"></div>
+        <h2 style="margin-top:18px">Movers <span class="sub">Latest month vs prior</span></h2>
+        <div id="movers"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Installation heat <span class="sub">Each installation measured against its own average</span></h2>
+      <div class="tablewrap"><table id="heatTbl"></table></div>
+      <div class="hint">Orange means the month ran above that installation's own average, which keeps a large base from masking a small one.</div>
+    </div>
+  </section>
+
+  <!-- ============ PROMOTION ROI ============ -->
+  <section class="view" id="v-promo">
+    <div class="controls">
+      <div class="fchips" id="chChips"></div>
+      <div class="spacer"></div>
+      <span class="hint" id="promoCount"></span>
+    </div>
+    <div class="grid even">
+      <div class="card">
+        <h2>Spend against return <span class="sub">Bubble size is incremental margin. Below the line loses money.</span></h2>
+        <div class="chartbox"><canvas id="chartScatter"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Channel economics <span class="sub">Spend-weighted ROI</span></h2>
+        <div class="chartbox"><canvas id="chartChannels"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Campaign league table <span class="sub">Click a row for an AI assessment</span></h2>
+      <div class="tablewrap"><table id="campTbl"></table></div>
+      <div class="out" id="campOut" style="margin-top:14px" hidden></div>
+    </div>
+  </section>
+
+  <!-- ============ PROGRAMS ============ -->
+  <section class="view" id="v-programs">
+    <div class="card">
+      <h2>Program portfolio <span class="sub">Sustain, scale, or sunset, with the evidence behind each call</span></h2>
+      <div class="tablewrap"><table id="progTbl"></table></div>
+      <div class="hint">Recommendation rule: scale when the trend exceeds 6% and margin rate exceeds 25%. Review when the trend is negative or margin rate falls below 15%. Every input is visible in the row, so the call can be challenged.</div>
+    </div>
+    <div class="grid even">
+      <div class="card">
+        <h2>Revenue by program</h2>
+        <div class="chartbox sm"><canvas id="chartPrograms"></canvas></div>
+      </div>
+      <div class="card">
+        <h2>Margin rate against trend <span class="sub">Upper right is healthy and growing</span></h2>
+        <div class="chartbox sm"><canvas id="chartProgScatter"></canvas></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Unusual movements <span class="sub">Month over month changes beyond two standard deviations</span></h2>
+      <button class="btn" id="btnAnomalies">Explain the anomalies</button>
+      <div class="out" id="anomOut" style="margin-top:12px"><span class="placeholder">Flags statistically unusual movements by installation and business line, then explains what a manager should check first.</span></div>
+      <div class="tablewrap" style="margin-top:14px"><table id="anomTbl"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ SCENARIO ============ -->
+  <section class="view" id="v-scenario">
+    <div class="grid">
+      <div class="card">
+        <h2>Levers <span class="sub">Adjust and the projection recalculates</span></h2>
+        <div class="sliders">
+          <div class="slider">
+            <div class="top"><span class="lbl">Demand shift</span><span class="val" id="vDemand">0%</span></div>
+            <input type="range" id="sDemand" min="-30" max="30" value="0" step="1">
+            <div class="hint">Applies to projected revenue across the horizon.</div>
+          </div>
+          <div class="slider">
+            <div class="top"><span class="lbl">Gross margin rate change</span><span class="val" id="vMargin">0.0 pts</span></div>
+            <input type="range" id="sMargin" min="-10" max="10" value="0" step="0.5">
+            <div class="hint">Percentage points added to or removed from the current blended margin rate.</div>
+          </div>
+          <div class="slider">
+            <div class="top"><span class="lbl">Promotion budget change</span><span class="val" id="vPromo">0%</span></div>
+            <input type="range" id="sPromo" min="-50" max="50" value="0" step="5">
+            <div class="hint">Scales total promotion spend and its returns together.</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="sRealloc">
+            <span>Move spend out of campaigns that do not return their cost</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
+          <button class="btn" id="btnRunScenario">Run scenario</button>
+          <button class="btn ghost" id="btnExplainScenario">Explain this scenario</button>
+          <button class="btn ghost" id="btnSaveScenario">Save</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Projected impact <span class="sub" id="scenHorizon">Next three months</span></h2>
+        <div class="delta-grid" id="deltaGrid">
+          <div class="empty">Set the levers and run the scenario.</div>
+        </div>
+        <div id="scenNote" class="hint"></div>
+        <div class="out" id="scenOut" style="margin-top:14px" hidden></div>
+      </div>
+    </div>
+    <div class="card">
+      <h2>Saved scenarios</h2>
+      <div class="tablewrap"><table id="scenTbl"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ DATA ============ -->
+  <section class="view" id="v-data">
+    <div class="card">
+      <h2>Sales records
+        <span class="sub">Filter, sort, edit in place, add, import, or export</span></h2>
+      <div class="controls">
+        <input type="text" class="search" id="dataSearch" placeholder="Search installation or category">
+        <label for="pageSize">Rows</label>
+        <select id="pageSize">
+          <option>25</option><option selected>50</option><option>100</option><option>250</option>
+        </select>
+        <div class="spacer"></div>
+        <button class="btn ghost sm" id="btnAddRow">Add record</button>
+        <button class="btn ghost sm" id="btnImport">Import CSV</button>
+        <button class="btn ghost sm" id="btnExport">Export CSV</button>
+        <input type="file" id="fileInput" accept=".csv" hidden>
+      </div>
+      <div class="alert info" id="dataMsg" hidden></div>
+      <div class="tablewrap"><table id="dataTbl"></table></div>
+      <div class="pager">
+        <button class="btn ghost sm" id="pgPrev">Previous</button>
+        <span id="pgInfo"></span>
+        <button class="btn ghost sm" id="pgNext">Next</button>
+      </div>
+      <div class="hint" id="dataTotals"></div>
+    </div>
+
+    <div class="card" id="addCard" hidden>
+      <h2>Add a sales record</h2>
+      <div class="controls">
+        <select id="aPeriod"></select>
+        <select id="aInst"></select>
+        <select id="aCat"></select>
+        <input type="number" id="aRev" placeholder="Revenue" step="0.01">
+        <input type="number" id="aGm" placeholder="Gross margin" step="0.01">
+        <input type="number" id="aUnits" placeholder="Units">
+        <button class="btn sm" id="btnSaveRow">Save record</button>
+        <button class="btn ghost sm" id="btnCancelRow">Cancel</button>
+      </div>
+      <div class="hint">Adding a record for an existing period, installation, and category combination updates that record.</div>
+    </div>
+
+    <div class="card">
+      <h2>Change history <span class="sub">Every edit, import, and deletion</span></h2>
+      <div class="tablewrap"><table id="auditTbl"></table></div>
+    </div>
+  </section>
+
+  <!-- ============ AI ANALYST ============ -->
+  <section class="view" id="v-ai">
+    <div class="ai-wrap">
+      <div class="card">
+        <h2>Executive briefing
+          <span class="sub"><span class="engine" id="engBrief"><span class="dot"></span><span id="engBriefTxt">engine: checking</span></span></span></h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="btnBrief">Generate briefing</button>
+          <button class="btn ghost" id="btnCopy" hidden>Copy</button>
+        </div>
+        <div class="out" id="briefOut" style="margin-top:12px"><span class="placeholder">Produces a five paragraph briefing covering the latest month, the forecast and its accuracy, installation performance, promotion economics, and the single highest value action with a dollar figure attached. Every number comes from the metrics computed in this system.</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Ask the data <span class="sub">Grounded in computed metrics, nothing invented</span></h2>
+        <div class="chat" id="chat">
+          <div class="msg ai">Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the enterprise scorecard. Answers carry the figures that support them, and each one names the engine that produced it.</div>
+        </div>
+        <div class="askrow">
+          <input type="text" class="search" id="askInput" placeholder="Ask a question about this data">
+          <button class="btn" id="btnAsk">Ask</button>
+        </div>
+        <div class="chips" id="chips">
+          <button>Which installation grew fastest?</button>
+          <button>Which channel has the worst ROI?</button>
+          <button>Where is the biggest opportunity?</button>
+          <button>Which programs should we scale?</button>
+          <button>What should we expect next quarter?</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ ADMIN ============ -->
+  <section class="view" id="v-admin">
+    <div class="card">
+      <h2>Users</h2>
+      <div class="controls">
+        <input type="email" id="nuEmail" placeholder="Email">
+        <input type="text" id="nuName" placeholder="Full name">
+        <input type="password" id="nuPass" placeholder="Password (10+ characters)">
+        <select id="nuRole">
+          <option value="viewer">Viewer</option>
+          <option value="analyst">Analyst</option>
+          <option value="admin">Admin</option>
+        </select>
+        <button class="btn sm" id="btnAddUser">Add user</button>
+      </div>
+      <div class="alert info" id="userMsg" hidden></div>
+      <div class="tablewrap"><table id="userTbl"></table></div>
+      <div class="hint">Viewers can read everything. Analysts can also edit data. Admins can manage accounts.</div>
+    </div>
+    <div class="card">
+      <h2>AI call log <span class="sub">Every request, which engine answered, and how long it took</span></h2>
+      <div class="tablewrap"><table id="aiLogTbl"></table></div>
+    </div>
+  </section>
+</main>
+
+<div id="tip" role="tooltip"></div>
+<div class="foot">
+  <span>MCCS Revenue Intelligence &middot; synthetic dataset &middot; Dexian Government Solutions</span>
+  <span>Forecast: seasonal index times linear trend &middot; AI narrates computed metrics only</span>
+</div>
+
+<script src="/client.js"></script>
+</body>
+</html>
