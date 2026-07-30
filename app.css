@@ -92,30 +92,16 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
   border-right: 1px solid var(--shell-line);
 }
 
-.rail-top { padding: 22px 20px 18px; }
-.logo { display: flex; gap: 11px; align-items: flex-start; text-decoration: none; color: inherit; }
-.logo-mark {
-  width: 30px; height: 30px; flex: none; background: var(--scarlet);
-  display: flex; align-items: flex-end; justify-content: center; gap: 2.5px; padding: 0 0 7px;
-  border-radius: 2px;
+.rail-top { padding: 24px 20px 20px; border-bottom: 1px solid var(--shell-line); }
+.logo { display: block; text-decoration: none; }
+.logo img {
+  display: block; width: 172px; height: auto;
+  /* The mark is supplied as artwork, so it is never restyled, only sized. */
 }
-.logo-mark span { width: 3.5px; background: #fff; border-radius: 1px; display: block; }
-.logo-mark span:nth-child(1) { height: 7px; }
-.logo-mark span:nth-child(2) { height: 13px; }
-.logo-mark span:nth-child(3) { height: 10px; }
-.logo-txt b {
-  display: block; color: #fff; font-size: 14px; font-weight: 600;
-  letter-spacing: -.01em; line-height: 1.25;
-}
-.logo-txt i {
-  display: block; font-style: normal; font-family: var(--mono);
-  font-size: 9.5px; letter-spacing: .05em; color: #79828A; margin-top: 3px; line-height: 1.4;
-}
-
 .rail-nav { flex: 1; padding: 4px 12px; overflow-y: auto; }
 .rail-label {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .13em;
-  text-transform: uppercase; color: #626B72; padding: 17px 9px 8px;
+  text-transform: uppercase; color: #7E878E; padding: 17px 9px 8px;
 }
 .rail-nav .rail-label:first-child { padding-top: 4px; }
 .rail-nav button {
@@ -149,10 +135,10 @@ button, input, select, textarea { font-family: inherit; font-size: inherit; colo
 }
 .whoami .who i {
   display: block; font-style: normal; font-family: var(--mono);
-  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: #79828A; margin-top: 1px;
+  font-size: 9.5px; letter-spacing: .09em; text-transform: uppercase; color: #8A939B; margin-top: 1px;
 }
 .rail-note {
-  font-family: var(--mono); font-size: 9px; line-height: 1.6; color: #5C656C;
+  font-family: var(--mono); font-size: 9.5px; line-height: 1.6; color: #7E878E;
   letter-spacing: .04em; margin-top: 13px;
 }
 
@@ -559,10 +545,10 @@ tr.flash td { animation: flash 1.2s ease-out; }
 }
 .auth-fig .l {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .09em;
-  text-transform: uppercase; color: #79828A; margin-top: 5px;
+  text-transform: uppercase; color: #8A939B; margin-top: 5px;
 }
 .auth-note {
-  font-family: var(--mono); font-size: 9.5px; letter-spacing: .07em; color: #5C656C; line-height: 1.7;
+  font-family: var(--mono); font-size: 9.5px; letter-spacing: .07em; color: #7E878E; line-height: 1.7;
 }
 
 .auth-form { display: flex; align-items: center; justify-content: center; padding: 44px 30px; background: var(--surface); }
@@ -580,8 +566,8 @@ tr.flash td { animation: flash 1.2s ease-out; }
 }
 .field input { width: 100%; padding: 10px 12px; font-size: 14px; }
 
-.auth-brand .logo { display: inline-flex; gap: 11px; align-items: flex-start; }
-.auth-brand .logo-txt b { color: #fff; }
+.auth-brand .logo { display: block; }
+.auth-brand .logo img { display: block; width: 208px; height: auto; }
 
 .minihead {
   font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em;

@@ -51,6 +51,8 @@ login.html      Sign in page
 app.html        Dashboard
 app.css         Styles for both pages
 client.js       Dashboard logic (browser)
+logo-light.png  Dexian Government Solutions mark, white, for dark surfaces
+logo-dark.png   The same mark in ink, for light surfaces
 package.json
 render.yaml
 ```
@@ -222,6 +224,12 @@ Admin tab, add each person with the **viewer** role. Viewers can explore everyth
 - Have the Promotion ROI tab ready, since that is where the money argument lands.
 
 ---
+
+## Branding
+
+The Dexian Government Solutions mark is served from `/logo.png`, which maps to `logo-light.png` (white, transparent) for the dark navigation rail and sign-in panel. `logo-dark.png` is the same artwork in ink for use on light surfaces.
+
+Both were derived from the supplied artwork by converting its background to transparency, so the letterforms are the original ones and are never restyled in CSS, only sized. If you have the vector original, drop an SVG in and point the two routes in `server.js` at it. That would be sharper at large sizes, though at the sizes used here the raster is already above screen resolution.
 
 ## Running locally
 

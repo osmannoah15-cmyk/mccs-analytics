@@ -91,6 +91,17 @@ app.get('/app.css', (_req, res) => {
 app.get('/client.js', requireAuth, (_req, res) => {
   res.type('application/javascript').sendFile(path.join(__dirname, 'client.js'));
 });
+// The mark is on the sign-in page too, so it stays outside the auth gate.
+app.get('/logo.png', (_req, res) => {
+  res.type('image/png')
+     .set('Cache-Control', isProd ? 'public, max-age=86400' : 'no-cache')
+     .sendFile(path.join(__dirname, 'logo-light.png'));
+});
+app.get('/logo-dark.png', (_req, res) => {
+  res.type('image/png')
+     .set('Cache-Control', isProd ? 'public, max-age=86400' : 'no-cache')
+     .sendFile(path.join(__dirname, 'logo-dark.png'));
+});
 
 app.use((req, res) => res.status(404).json({ error: 'Not found', path: req.path }));
 
