@@ -32,11 +32,10 @@
     <button data-v="scorecard" class="on">Scorecard</button>
     <button data-v="sales">Sales &amp; forecast</button>
     <button data-v="promo">Promotion ROI</button>
-    <button data-v="programs">Programs</button>
+    <button data-v="lob">Lines of business</button>
     <button data-v="scenario">Scenario</button>
-    <button data-v="data">Data</button>
     <button data-v="ai">AI analyst</button>
-    <button data-v="admin" id="tabAdmin" hidden>Admin</button>
+    <button data-v="admin" id="tabAdmin" hidden>Manage</button>
   </div>
 </nav>
 
@@ -59,20 +58,23 @@
 
   <!-- ============ SCORECARD ============ -->
   <section class="view on" id="v-scorecard">
-    <div class="grid">
-      <div class="card">
-        <h2>Enterprise measurement health
-          <span class="sub">KPIs on track across the three objectives</span></h2>
-        <div class="health">
+    <div class="card">
+      <h2>Measured against its own history
+        <span class="sub" id="scoreCompared"></span></h2>
+      <p class="lede">Each measure below is compared with what MCCS itself achieved before, either the same month a year ago or the trailing twelve month average. Nothing is scored against an invented target, so every result can be traced back to the data.</p>
+      <div class="scorehead">
+        <div class="scorestat">
           <div class="big" id="healthPct">-</div>
-          <div class="meta" id="healthMeta">Computing...</div>
+          <div class="meta">of measures ahead of<br>their own baseline</div>
         </div>
-        <div class="bar"><i id="healthBar" style="width:0%"></i></div>
-        <div class="hint">Every KPI below is derived from the sales and campaign data in this system. Nothing is entered by hand.</div>
-      </div>
-      <div class="card">
-        <h2>Portfolio signal</h2>
-        <div id="portfolioSignal"></div>
+        <div class="scorestat">
+          <div class="big" id="instrumented">-</div>
+          <div class="meta">of the three objectives<br>can be measured today</div>
+        </div>
+        <div style="flex:1;min-width:220px">
+          <div id="healthMeta" class="meta" style="margin-bottom:8px"></div>
+          <div class="bar"><i id="healthBar" style="width:0%"></i></div>
+        </div>
       </div>
     </div>
 
@@ -88,7 +90,7 @@
       <h2>Scorecard narrative
         <span class="sub"><span class="engine" id="engScore"><span class="dot"></span><span id="engScoreTxt">engine: checking</span></span></span></h2>
       <button class="btn" id="btnScorecardAI">Generate narrative</button>
-      <div class="out" id="scorecardOut" style="margin-top:12px"><span class="placeholder">Generates a written assessment of each enterprise objective, naming which measures are on track and what would have to change to move the ones that are not.</span></div>
+      <div class="out" id="scorecardOut" style="margin-top:12px"><span class="placeholder">Generates a written assessment of each objective, naming which measures are ahead of their baseline, which are behind, and what would have to change.</span></div>
     </div>
   </section>
 
@@ -128,43 +130,71 @@
 
   <!-- ============ PROMOTION ROI ============ -->
   <section class="view" id="v-promo">
-    <div class="controls">
-      <div class="fchips" id="chChips"></div>
-      <div class="spacer"></div>
-      <span class="hint" id="promoCount"></span>
+    <div class="card" style="padding:14px 20px">
+      <div class="filterset">
+        <div class="frow"><span class="flabel">Channel</span><div class="fchips" id="chChips"></div></div>
+        <div class="frow"><span class="flabel">Line of business</span><div class="fchips" id="blChips"></div></div>
+        <div class="frow"><span class="flabel">Installation</span><div class="fchips" id="instChips"></div></div>
+        <div class="frow"><span class="flabel">Result</span><div class="fchips" id="resChips">
+          <button data-res="all" class="on">All</button>
+          <button data-res="win">Returned its cost</button>
+          <button data-res="lose">Did not</button>
+        </div></div>
+      </div>
+      <div class="activebar">
+        <span class="hint" id="promoCount"></span>
+        <button class="btn ghost sm" id="btnClearPromo" hidden>Clear all filters</button>
+      </div>
     </div>
     <div class="grid even">
       <div class="card">
-        <h2>Spend against return <span class="sub">Bubble size is incremental margin. Below the line loses money.</span></h2>
+        <h2>Spend against return <span class="sub">Click a campaign to inspect it. Bubble size is incremental margin.</span></h2>
         <div class="chartbox"><canvas id="chartScatter"></canvas></div>
       </div>
       <div class="card">
-        <h2>Channel economics <span class="sub">Spend-weighted ROI</span></h2>
+        <h2>Channel economics <span class="sub">Click a bar to filter to that channel</span></h2>
         <div class="chartbox"><canvas id="chartChannels"></canvas></div>
       </div>
     </div>
     <div class="card">
-      <h2>Campaign league table <span class="sub">Click a row for an AI assessment</span></h2>
+      <h2>Campaign league table <span class="sub">Click a row for an AI assessment of whether to continue, rework, or stop it</span></h2>
       <div class="tablewrap"><table id="campTbl"></table></div>
       <div class="out" id="campOut" style="margin-top:14px" hidden></div>
     </div>
   </section>
 
   <!-- ============ PROGRAMS ============ -->
-  <section class="view" id="v-programs">
+  <section class="view" id="v-lob">
     <div class="card">
-      <h2>Program portfolio <span class="sub">Sustain, scale, or sunset, with the evidence behind each call</span></h2>
-      <div class="tablewrap"><table id="progTbl"></table></div>
-      <div class="hint">Recommendation rule: scale when the trend exceeds 6% and margin rate exceeds 25%. Review when the trend is negative or margin rate falls below 15%. Every input is visible in the row, so the call can be challenged.</div>
+      <h2>Lines of business <span class="sub">Sustain, scale, or review, with the evidence behind each call</span></h2>
+      <div class="tablewrap"><table id="lobTbl"></table></div>
+      <details class="explain">
+        <summary>What these measures mean</summary>
+        <dl>
+          <dt>Margin rate</dt>
+          <dd>Gross margin as a share of revenue. How much of every dollar taken in is kept after the cost of goods.</dd>
+          <dt>Trend</dt>
+          <dd>Revenue in the most recent half of the period against the earlier half. Positive means the line is growing.</dd>
+          <dt>Average transaction</dt>
+          <dd>Revenue divided by transactions. What a patron spends per visit.</dd>
+          <dt>Stock cover</dt>
+          <dd>How many days of selling the stock on hand would cover at the current rate. Lower means leaner. Too low risks running out, too high ties up cash in inventory that is not selling. Only lines that hold physical stock have this.</dd>
+          <dt>Stock turns</dt>
+          <dd>How many times a year the stock is sold through and replaced. Six turns means roughly two months of stock on the shelf at any time. Higher generally means capital is working harder.</dd>
+          <dt>Promotion ROI</dt>
+          <dd>Return on marketing spend for that line. Zero is break-even, so a negative figure means the promotions cost more than the margin they produced.</dd>
+        </dl>
+      </details>
+      <div class="hint">Recommendation rule: scale when the trend exceeds 6% and margin rate exceeds 25%, review when the trend is negative or margin rate falls below 15%. Every input sits in the row, so the call can be challenged rather than taken on faith.</div>
     </div>
     <div class="grid even">
       <div class="card">
-        <h2>Revenue by program</h2>
-        <div class="chartbox sm"><canvas id="chartPrograms"></canvas></div>
+        <h2>Revenue by line of business</h2>
+        <div class="chartbox sm"><canvas id="chartLob"></canvas></div>
       </div>
       <div class="card">
         <h2>Margin rate against trend <span class="sub">Upper right is healthy and growing</span></h2>
-        <div class="chartbox sm"><canvas id="chartProgScatter"></canvas></div>
+        <div class="chartbox sm"><canvas id="chartLobScatter"></canvas></div>
       </div>
     </div>
     <div class="card">
@@ -177,53 +207,124 @@
 
   <!-- ============ SCENARIO ============ -->
   <section class="view" id="v-scenario">
+    <div class="card">
+      <h2>What if <span class="sub">Set the levers, and see how the next three months change</span></h2>
+      <p class="lede">Demand and promotion spend both move revenue, so both feed the same projection below. The margin rate lever changes what is kept from that revenue. Every effect is listed separately so you can see where the number came from.</p>
+    </div>
+
     <div class="grid">
       <div class="card">
-        <h2>Levers <span class="sub">Adjust and the projection recalculates</span></h2>
+        <h2>Levers</h2>
         <div class="sliders">
           <div class="slider">
-            <div class="top"><span class="lbl">Demand shift</span><span class="val" id="vDemand">0%</span></div>
+            <div class="top"><span class="lbl">Patron demand</span><span class="val" id="vDemand">no change</span></div>
             <input type="range" id="sDemand" min="-30" max="30" value="0" step="1">
-            <div class="hint">Applies to projected revenue across the horizon.</div>
+            <div class="hint">More or fewer patrons buying, at the same prices. Moves revenue directly.</div>
           </div>
           <div class="slider">
-            <div class="top"><span class="lbl">Gross margin rate change</span><span class="val" id="vMargin">0.0 pts</span></div>
-            <input type="range" id="sMargin" min="-10" max="10" value="0" step="0.5">
-            <div class="hint">Percentage points added to or removed from the current blended margin rate.</div>
-          </div>
-          <div class="slider">
-            <div class="top"><span class="lbl">Promotion budget change</span><span class="val" id="vPromo">0%</span></div>
+            <div class="top"><span class="lbl">Promotion budget</span><span class="val" id="vPromo">no change</span></div>
             <input type="range" id="sPromo" min="-50" max="50" value="0" step="5">
-            <div class="hint">Scales total promotion spend and its returns together.</div>
+            <div class="hint">Also moves revenue, at the return per dollar these campaigns actually achieved. The cost of the extra spend is subtracted from margin.</div>
+          </div>
+          <div class="slider">
+            <div class="top"><span class="lbl">Gross margin rate</span><span class="val" id="vMargin">no change</span></div>
+            <input type="range" id="sMargin" min="-10" max="10" value="0" step="0.5">
+            <div class="hint">Pricing or cost of goods. Changes what is kept from revenue, not revenue itself.</div>
           </div>
           <label class="toggle">
             <input type="checkbox" id="sRealloc">
             <span>Move spend out of campaigns that do not return their cost</span>
           </label>
+          <div class="hint" style="margin-top:-8px">Total spend stays the same. Only its destination changes.</div>
         </div>
         <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
           <button class="btn" id="btnRunScenario">Run scenario</button>
-          <button class="btn ghost" id="btnExplainScenario">Explain this scenario</button>
+          <button class="btn ghost" id="btnResetScenario">Reset levers</button>
           <button class="btn ghost" id="btnSaveScenario">Save</button>
         </div>
       </div>
+
       <div class="card">
-        <h2>Projected impact <span class="sub" id="scenHorizon">Next three months</span></h2>
-        <div class="delta-grid" id="deltaGrid">
-          <div class="empty">Set the levers and run the scenario.</div>
-        </div>
-        <div id="scenNote" class="hint"></div>
-        <div class="out" id="scenOut" style="margin-top:14px" hidden></div>
+        <h2>Result <span class="sub" id="scenHorizon">Next three months</span></h2>
+        <div id="scenHeadline"><div class="empty">Move a lever, then run the scenario.</div></div>
+        <div id="waterfall"></div>
+        <div id="scenAssume" class="hint"></div>
       </div>
     </div>
+
+    <div class="card">
+      <h2>Read the result <span class="sub">Written from the figures above</span></h2>
+      <button class="btn" id="btnExplainScenario">Explain this scenario</button>
+      <div class="out" id="scenOut" style="margin-top:12px"><span class="placeholder">Explains the margin impact, names the biggest driver, and states one caution about what the model does not account for.</span></div>
+    </div>
+
     <div class="card">
       <h2>Saved scenarios</h2>
       <div class="tablewrap"><table id="scenTbl"></table></div>
     </div>
   </section>
 
-  <!-- ============ DATA ============ -->
-  <section class="view" id="v-data">
+  <!-- ============ AI ANALYST ============ -->
+  <section class="view" id="v-ai">
+    <div class="ai-wrap">
+      <div class="card">
+        <h2>Executive briefing
+          <span class="sub"><span class="engine" id="engBrief"><span class="dot"></span><span id="engBriefTxt">engine: checking</span></span></span></h2>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="btn" id="btnBrief">Generate briefing</button>
+          <button class="btn ghost" id="btnCopy" hidden>Copy</button>
+        </div>
+        <div class="out" id="briefOut" style="margin-top:12px"><span class="placeholder">Produces a five paragraph briefing covering the latest month, the forecast and its accuracy, installation performance, promotion economics, and the single highest value action with a dollar figure attached. Every number comes from the metrics computed in this system.</span></div>
+      </div>
+
+      <div class="card">
+        <h2>Ask the data <span class="sub">Grounded in computed metrics, nothing invented</span></h2>
+        <div class="chat" id="chat">
+          <div class="msg ai">Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the enterprise scorecard. Answers carry the figures that support them, and each one names the engine that produced it.</div>
+        </div>
+        <div class="askrow">
+          <input type="text" class="search" id="askInput" placeholder="Ask a question about this data">
+          <button class="btn" id="btnAsk">Ask</button>
+        </div>
+        <div class="chips" id="chips">
+          <button>Which installation grew fastest?</button>
+          <button>Which channel has the worst ROI?</button>
+          <button>Where is the biggest opportunity?</button>
+          <button>Which programs should we scale?</button>
+          <button>What should we expect next quarter?</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ MANAGE ============ -->
+  <section class="view" id="v-admin">
+    <div class="card" id="dataStatusCard">
+      <h2>Data status <span class="sub">What is loaded, and what is available to load</span></h2>
+      <div class="grid even">
+        <div>
+          <div class="obj" style="border:0;padding:0;box-shadow:none">
+            <div class="eyebrow">In the database</div>
+            <div id="dbStatus"><div class="empty">Checking...</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="obj" style="border:0;padding:0;box-shadow:none">
+            <div class="eyebrow">Seed file on the server</div>
+            <div id="fileStatus"><div class="empty">Checking...</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="alert info" id="loadMsg" hidden></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+        <button class="btn" id="btnLoadData">Load data</button>
+        <button class="btn ghost" id="btnReloadData">Replace all data</button>
+        <button class="btn ghost" id="btnRefreshStatus">Refresh status</button>
+      </div>
+      <div class="hint">Load data fills an empty database and leaves existing records alone. Replace all data wipes the sales, campaign, installation, and category tables first, which also discards any edits made in the app. User accounts are never touched by either.</div>
+    </div>
+
+
     <div class="card">
       <h2>Sales records
         <span class="sub">Filter, sort, edit in place, add, import, or export</span></h2>
@@ -270,69 +371,8 @@
       <h2>Change history <span class="sub">Every edit, import, and deletion</span></h2>
       <div class="tablewrap"><table id="auditTbl"></table></div>
     </div>
-  </section>
-
-  <!-- ============ AI ANALYST ============ -->
-  <section class="view" id="v-ai">
-    <div class="ai-wrap">
-      <div class="card">
-        <h2>Executive briefing
-          <span class="sub"><span class="engine" id="engBrief"><span class="dot"></span><span id="engBriefTxt">engine: checking</span></span></span></h2>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn" id="btnBrief">Generate briefing</button>
-          <button class="btn ghost" id="btnCopy" hidden>Copy</button>
-        </div>
-        <div class="out" id="briefOut" style="margin-top:12px"><span class="placeholder">Produces a five paragraph briefing covering the latest month, the forecast and its accuracy, installation performance, promotion economics, and the single highest value action with a dollar figure attached. Every number comes from the metrics computed in this system.</span></div>
-      </div>
-
-      <div class="card">
-        <h2>Ask the data <span class="sub">Grounded in computed metrics, nothing invented</span></h2>
-        <div class="chat" id="chat">
-          <div class="msg ai">Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the enterprise scorecard. Answers carry the figures that support them, and each one names the engine that produced it.</div>
-        </div>
-        <div class="askrow">
-          <input type="text" class="search" id="askInput" placeholder="Ask a question about this data">
-          <button class="btn" id="btnAsk">Ask</button>
-        </div>
-        <div class="chips" id="chips">
-          <button>Which installation grew fastest?</button>
-          <button>Which channel has the worst ROI?</button>
-          <button>Where is the biggest opportunity?</button>
-          <button>Which programs should we scale?</button>
-          <button>What should we expect next quarter?</button>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ============ ADMIN ============ -->
-  <section class="view" id="v-admin">
-    <div class="card">
-      <h2>Data status <span class="sub">What is loaded, and what is available to load</span></h2>
-      <div class="grid even">
-        <div>
-          <div class="obj" style="border:0;padding:0;box-shadow:none">
-            <div class="eyebrow">In the database</div>
-            <div id="dbStatus"><div class="empty">Checking...</div></div>
-          </div>
-        </div>
-        <div>
-          <div class="obj" style="border:0;padding:0;box-shadow:none">
-            <div class="eyebrow">Seed file on the server</div>
-            <div id="fileStatus"><div class="empty">Checking...</div></div>
-          </div>
-        </div>
-      </div>
-      <div class="alert info" id="loadMsg" hidden></div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
-        <button class="btn" id="btnLoadData">Load data</button>
-        <button class="btn ghost" id="btnReloadData">Replace all data</button>
-        <button class="btn ghost" id="btnRefreshStatus">Refresh status</button>
-      </div>
-      <div class="hint">Load data fills an empty database and leaves existing records alone. Replace all data wipes the sales, campaign, installation, and category tables first, which also discards any edits made in the app. User accounts are never touched by either.</div>
-    </div>
-
-    <div class="card">
+  
+    <div class="card" id="usersCard">
       <h2>Users</h2>
       <div class="controls">
         <input type="email" id="nuEmail" placeholder="Email">
@@ -349,7 +389,7 @@
       <div class="tablewrap"><table id="userTbl"></table></div>
       <div class="hint">Viewers can read everything. Analysts can also edit data. Admins can manage accounts.</div>
     </div>
-    <div class="card">
+    <div class="card" id="aiLogCard">
       <h2>AI call log <span class="sub">Every request, which engine answered, and how long it took</span></h2>
       <div class="tablewrap"><table id="aiLogTbl"></table></div>
     </div>

@@ -10,7 +10,8 @@ const S = {
   campaigns: [],
   channels: [],
   metric: 'revenue',
-  channelFilter: new Set(),
+  promoFilter: { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' },
+  selectedCampaign: null,
   charts: {},
   data: { page: 1, pageSize: 50, sort: 'period', dir: 'asc', search: '' },
   scenario: null
@@ -116,7 +117,13 @@ async function boot() {
     S.user = me.user;
     $('userName').textContent = S.user.name;
     $('userRole').textContent = S.user.role;
-    if (S.user.role === 'admin') $('tabAdmin').hidden = false;
+    // Analysts need the data tools, admins additionally get accounts and logs.
+    if (['admin', 'analyst'].includes(S.user.role)) $('tabAdmin').hidden = false;
+    if (S.user.role !== 'admin') {
+      ['dataStatusCard', 'usersCard', 'aiLogCard'].forEach((id) => {
+        const n = $(id); if (n) n.hidden = true;
+      });
+    }
   } catch { return; }
 
   S.meta = await api('/api/meta');
@@ -175,7 +182,7 @@ async function refresh() {
   renderScorecard();
   renderSales();
   await loadCampaigns();
-  renderPrograms();
+  renderLob();
   renderAnomalies();
 }
 
@@ -204,44 +211,56 @@ function renderKpis() {
 function renderScorecard() {
   const d = S.analytics.digest;
   const sc = d.scorecard;
+  const sum = sc.summary;
 
-  $('healthPct').textContent = `${sc.summary.healthPct}%`;
-  $('healthMeta').innerHTML =
-    `${sc.summary.onTrack} of ${sc.summary.kpiCount} measures on track<br>` +
-    `${sc.summary.scaleReady} programs ready to scale, ${sc.summary.needsReview} need review`;
-  $('healthBar').style.width = `${sc.summary.healthPct}%`;
+  $('scoreCompared').textContent = `Latest month compared with ${sc.comparedWith}`;
+  $('healthPct').textContent = `${sum.onTrack} of ${sum.kpiCount}`;
+  $('instrumented').textContent = `${sum.objectivesInstrumented} of ${sum.objectivesTotal}`;
+  $('healthBar').style.width = `${sum.healthPct}%`;
+  $('healthMeta').innerHTML = sum.offTrack
+    ? `${sum.offTrack} ${sum.offTrack === 1 ? 'measure is' : 'measures are'} behind. Each objective below shows what it is measured against.`
+    : 'Every measure is ahead of its own baseline.';
 
-  const fmtKpi = (k) => {
+  const fmtVal = (k) => {
     if (k.unit === 'usd') return money(k.value);
-    if (k.unit === 'pct') return `${k.value > 0 ? '+' : ''}${k.value}%`;
-    if (k.unit === 'months') return `${k.value} mo`;
-    return num(k.value);
+    if (k.unit === 'usd2') return `$${k.value.toFixed(2)}`;
+    if (k.unit === 'pct') return `${k.value.toFixed(1)}%`;
+    return num(Math.round(k.value));
   };
 
-  $('objGrid').innerHTML = sc.objectives.map((o, i) => `
-    <div class="obj">
-      <div class="eyebrow">Objective ${i + 1}</div>
-      <h3>${esc(o.title)}</h3>
-      <div class="note">${esc(o.note)}</div>
-      ${o.kpis.map((k) => `
-        <div class="kpirow">
-          <div class="kl">${esc(k.label)}</div>
-          <div class="kv"><span class="dot ${k.onTrack ? 'ok' : 'off'}"></span>${esc(fmtKpi(k))}</div>
-        </div>`).join('')}
-    </div>`).join('');
+  $('objGrid').innerHTML = sc.objectives.map((o, i) => {
+    if (!o.instrumented) {
+      return `
+        <div class="obj gap">
+          <div class="eyebrow">Objective ${i + 1}</div>
+          <h3>${esc(o.title)}</h3>
+          <div class="badge-gap">Not measurable yet</div>
+          <div class="gapnote">${esc(o.gap)}</div>
+          <div class="gapnote" style="margin-bottom:6px"><b>What would close the gap</b></div>
+          <ul class="needed">${o.needed.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
+        </div>`;
+    }
+    return `
+      <div class="obj">
+        <div class="eyebrow">Objective ${i + 1}</div>
+        <h3>${esc(o.title)}</h3>
+        <div class="note">${esc(o.basis)}</div>
+        ${o.kpis.map((k) => `
+          <div class="kpiblock">
+            <div class="row1">
+              <span class="klabel">${esc(k.label)}</span>
+              <span class="kval">${fmtVal(k)}</span>
+            </div>
+            <div class="row2">
+              <span class="dot ${k.onTrack ? 'ok' : 'off'}"></span>
+              <span class="delta ${k.onTrack ? 'win' : 'lose'}">${k.deltaPct == null ? '' : pct(k.deltaPct)}</span>
+              <span>vs ${fmtVal({ ...k, value: k.baseline })} &middot; ${esc(k.baselineLabel)}</span>
+            </div>
+            ${k.note ? `<div class="knote">${esc(k.note)}</div>` : ''}
+          </div>`).join('')}
+      </div>`;
+  }).join('');
 
-  // Portfolio signal panel
-  const p = d.programs;
-  const counts = p.reduce((a, x) => { a[x.recommendation] = (a[x.recommendation] || 0) + 1; return a; }, {});
-  const order = ['Scale', 'Sustain', 'Review', 'Sunset candidate'];
-  const cls = { Scale: 'up', Sustain: '', Review: 'warn', 'Sunset candidate': 'down' };
-  $('portfolioSignal').innerHTML = order.filter((k) => counts[k]).map((k) => `
-    <div class="sideline ${cls[k]}">
-      <div class="n">${counts[k]} ${counts[k] === 1 ? 'program' : 'programs'}</div>
-      <div class="d">${esc(k)}</div>
-    </div>`).join('') || '<div class="empty">No programs in this selection.</div>';
-
-  // Opportunity cards
   $('oppCards').innerHTML = d.opportunities.items.map((o) => `
     <div class="opp">
       <div class="v">${money(o.value)}</div>
@@ -359,34 +378,65 @@ async function loadCampaigns() {
   const data = await api(`/api/campaigns?${qs()}`);
   S.campaigns = data.campaigns;
   S.channels = data.channels;
-  renderChannelChips();
+  renderPromoFilters();
   renderPromo();
 }
 
-function renderChannelChips() {
-  const box = $('chChips');
-  const chans = [...new Set(S.campaigns.map((c) => c.channel))].sort();
-  box.innerHTML = `<button data-ch="__all" class="${S.channelFilter.size ? '' : 'on'}">All channels</button>` +
-    chans.map((c) => `<button data-ch="${esc(c)}" class="${S.channelFilter.has(c) ? 'on' : ''}">${esc(c)}</button>`).join('');
+function chipRow(boxId, values, active, onToggle) {
+  const box = $(boxId);
+  box.innerHTML = `<button data-v="__all" class="${active.size ? '' : 'on'}">All</button>` +
+    values.map((v) => `<button data-v="${esc(v)}" class="${active.has(v) ? 'on' : ''}">${esc(v)}</button>`).join('');
   box.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
-      const ch = b.dataset.ch;
-      if (ch === '__all') S.channelFilter.clear();
-      else if (S.channelFilter.has(ch)) S.channelFilter.delete(ch);
-      else S.channelFilter.add(ch);
-      renderChannelChips();
-      renderPromo();
+      const v = b.dataset.v;
+      if (v === '__all') active.clear();
+      else if (active.has(v)) active.delete(v);
+      else active.add(v);
+      onToggle();
     };
   });
 }
 
-const visibleCampaigns = () =>
-  S.channelFilter.size ? S.campaigns.filter((c) => S.channelFilter.has(c.channel)) : S.campaigns;
+function renderPromoFilters() {
+  const f = S.promoFilter;
+  const all = S.campaigns;
+  const redraw = () => { S.selectedCampaign = null; renderPromoFilters(); renderPromo(); };
+
+  chipRow('chChips', [...new Set(all.map((c) => c.channel))].sort(), f.channel, redraw);
+  chipRow('blChips', [...new Set(all.map((c) => c.businessLine))].sort(), f.bl, redraw);
+  chipRow('instChips', [...new Set(all.map((c) => c.installation))].sort(), f.inst, redraw);
+
+  $('resChips').querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.res === f.result);
+    b.onclick = () => { f.result = b.dataset.res; redraw(); };
+  });
+
+  const anyActive = f.channel.size || f.bl.size || f.inst.size || f.result !== 'all';
+  $('btnClearPromo').hidden = !anyActive;
+}
+
+function visibleCampaigns() {
+  const f = S.promoFilter;
+  return S.campaigns.filter((c) =>
+    (!f.channel.size || f.channel.has(c.channel)) &&
+    (!f.bl.size || f.bl.has(c.businessLine)) &&
+    (!f.inst.size || f.inst.has(c.installation)) &&
+    (f.result === 'all' || (f.result === 'win' ? c.profitable : !c.profitable)));
+}
 
 function renderPromo() {
   const cs = visibleCampaigns();
+  const spend = cs.reduce((a, c) => a + c.spend, 0);
+  const net = cs.reduce((a, c) => a + c.netMargin, 0);
   $('promoCount').textContent =
-    `${cs.length} campaigns \u00b7 ${money(cs.reduce((a, c) => a + c.spend, 0))} spend \u00b7 ${cs.filter((c) => c.profitable).length} returning cost`;
+    `${cs.length} of ${S.campaigns.length} campaigns \u00b7 ${money(spend)} spend \u00b7 ` +
+    `${cs.filter((c) => c.profitable).length} returned their cost \u00b7 net ${money(net)}`;
+
+  if (!cs.length) {
+    $('campTbl').innerHTML = '<tbody><tr><td class="empty">No campaigns match these filters.</td></tr></tbody>';
+    ['chartScatter', 'chartChannels'].forEach((id) => { if (S.charts[id]) { S.charts[id].destroy(); delete S.charts[id]; } });
+    return;
+  }
 
   drawChart('chartScatter', {
     type: 'bubble',
@@ -397,21 +447,32 @@ function renderPromo() {
           r: Math.max(4, Math.min(22, Math.sqrt(Math.abs(c.incrementalMargin)) / 42)),
           c
         })),
-        backgroundColor: cs.map((c) => c.profitable ? 'rgba(22,163,74,.42)' : 'rgba(220,38,38,.38)'),
-        borderColor: cs.map((c) => c.profitable ? '#15803D' : '#B91C1C'),
-        borderWidth: 1
+        backgroundColor: cs.map((c) => S.selectedCampaign === c.id
+          ? 'rgba(242,98,7,.75)'
+          : (c.profitable ? 'rgba(22,163,74,.42)' : 'rgba(220,38,38,.38)')),
+        borderColor: cs.map((c) => S.selectedCampaign === c.id
+          ? '#D95700' : (c.profitable ? '#15803D' : '#B91C1C')),
+        borderWidth: cs.map((c) => (S.selectedCampaign === c.id ? 2 : 1))
       }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
+      onClick: (evt, els) => {
+        if (!els.length) return;
+        const c = cs[els[0].index];
+        S.selectedCampaign = S.selectedCampaign === c.id ? null : c.id;
+        renderPromo();
+        if (S.selectedCampaign) explainCampaign(c.id);
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
           callbacks: {
             label: (ctx) => {
               const c = ctx.raw.c;
-              return [`${c.name} (${c.channel})`, `Spend ${money(c.spend)} \u00b7 ROI ${pct(c.roiPct)}`,
-                `Incremental margin ${money(c.incrementalMargin)}`];
+              return [`${c.name} (${c.channel})`, `${c.installation} \u00b7 ${c.businessLine}`,
+                `Spend ${money(c.spend)} \u00b7 ROI ${pct(c.roiPct)}`,
+                `Incremental margin ${money(c.incrementalMargin)}`, 'Click to inspect'];
             }
           }
         }
@@ -425,20 +486,41 @@ function renderPromo() {
     }
   });
 
-  const chans = S.channelFilter.size
-    ? S.channels.filter((c) => S.channelFilter.has(c.channel)) : S.channels;
+  // Channel economics are computed from what is visible, so the bars respond
+  // to the other filters rather than always showing the whole book.
+  const byCh = new Map();
+  cs.forEach((c) => {
+    if (!byCh.has(c.channel)) byCh.set(c.channel, { channel: c.channel, spend: 0, margin: 0, count: 0 });
+    const b = byCh.get(c.channel);
+    b.spend += c.spend; b.margin += c.incrementalMargin; b.count++;
+  });
+  const chans = [...byCh.values()]
+    .map((b) => ({ ...b, roiPct: b.spend ? ((b.margin - b.spend) / b.spend) * 100 : 0 }))
+    .sort((a, b) => a.roiPct - b.roiPct);
+
   drawChart('chartChannels', {
     type: 'bar',
     data: {
       labels: chans.map((c) => c.channel),
       datasets: [{
-        data: chans.map((c) => c.roiPct),
-        backgroundColor: chans.map((c) => c.roiPct >= 0 ? 'rgba(22,163,74,.65)' : 'rgba(220,38,38,.6)'),
+        data: chans.map((c) => Number(c.roiPct.toFixed(1))),
+        backgroundColor: chans.map((c) => S.promoFilter.channel.has(c.channel)
+          ? 'rgba(242,98,7,.8)'
+          : (c.roiPct >= 0 ? 'rgba(22,163,74,.65)' : 'rgba(220,38,38,.6)')),
         borderRadius: 5
       }]
     },
     options: {
       indexAxis: 'y', responsive: true, maintainAspectRatio: false,
+      onClick: (evt, els) => {
+        if (!els.length) return;
+        const ch = chans[els[0].index].channel;
+        const set = S.promoFilter.channel;
+        if (set.has(ch)) set.delete(ch); else set.add(ch);
+        S.selectedCampaign = null;
+        renderPromoFilters();
+        renderPromo();
+      },
       plugins: {
         legend: { display: false },
         tooltip: {
@@ -446,7 +528,7 @@ function renderPromo() {
             label: (c) => {
               const row = chans[c.dataIndex];
               return [`ROI ${pct(row.roiPct)}`, `Spend ${money(row.spend)} across ${row.count} campaigns`,
-                `Net ${money(row.netMargin)}`];
+                'Click to filter to this channel'];
             }
           }
         }
@@ -469,7 +551,7 @@ function renderCampaignTable(cs) {
       <th class="plain">Spend</th><th class="plain">Lift</th><th class="plain">Incr. margin</th><th class="plain">ROI</th>
     </tr></thead>
     <tbody>${sorted.map((c) => `
-      <tr data-id="${c.id}" style="cursor:pointer">
+      <tr data-id="${c.id}" style="cursor:pointer" class="${S.selectedCampaign === c.id ? 'selected' : ''}">
         <td class="name">${esc(c.name)}<span><br>${esc(c.installation)}</span></td>
         <td>${esc(c.channel)}</td>
         <td>${esc(c.businessLine)}</td>
@@ -480,7 +562,12 @@ function renderCampaignTable(cs) {
       </tr>`).join('')}</tbody>`;
 
   $('campTbl').querySelectorAll('tbody tr').forEach((tr) => {
-    tr.onclick = () => explainCampaign(tr.dataset.id);
+    tr.onclick = () => {
+      const id = Number(tr.dataset.id);
+      S.selectedCampaign = S.selectedCampaign === id ? null : id;
+      renderPromo();
+      if (S.selectedCampaign) explainCampaign(id);
+    };
   });
 }
 
@@ -498,17 +585,23 @@ async function explainCampaign(id) {
 
 /* ---------------- Programs ---------------- */
 
-function renderPrograms() {
-  const p = S.analytics.digest.programs;
+function renderLob() {
+  const p = S.analytics.digest.linesOfBusiness;
   const chipFor = (r) => ({
     Scale: 'win', Sustain: 'neutral', Review: 'warn', 'Sunset candidate': 'lose'
   }[r] || 'neutral');
 
-  $('progTbl').innerHTML = `
+  $('lobTbl').innerHTML = `
     <thead><tr>
-      <th class="plain">Program</th><th class="plain">Revenue</th><th class="plain">Margin rate</th>
-      <th class="plain">Trend</th><th class="plain">Avg transaction</th><th class="plain">Inv. turns</th>
-      <th class="plain">Days of supply</th><th class="plain">Promo ROI</th><th class="plain">Recommendation</th>
+      <th class="plain">Line of business</th>
+      <th class="plain">Revenue</th>
+      <th class="plain">Margin rate</th>
+      <th class="plain">Trend</th>
+      <th class="plain">Avg transaction</th>
+      <th class="plain" title="Days of selling the stock on hand would cover">Stock cover</th>
+      <th class="plain" title="Times a year stock is sold through and replaced">Stock turns</th>
+      <th class="plain">Promotion ROI</th>
+      <th class="plain">Recommendation</th>
     </tr></thead>
     <tbody>${p.map((x) => `
       <tr>
@@ -517,13 +610,15 @@ function renderPrograms() {
         <td>${x.marginRatePct}%</td>
         <td class="${x.trendPct >= 0 ? 'win' : 'lose'}">${pct(x.trendPct)}</td>
         <td>$${x.avgTransactionValue}</td>
-        <td>${x.inventoryTurns == null ? '<span class="chip neutral">no stock</span>' : x.inventoryTurns + 'x'}</td>
-        <td>${x.daysOfSupply == null ? '-' : x.daysOfSupply + ' days'}</td>
+        <td>${x.daysOfSupply == null
+              ? '<span class="chip neutral" title="This line holds no physical stock">no stock</span>'
+              : `${x.daysOfSupply} days`}</td>
+        <td>${x.inventoryTurns == null ? '-' : `${x.inventoryTurns}x a year`}</td>
         <td>${x.promoRoiPct == null ? '-' : pct(x.promoRoiPct)}</td>
         <td><span class="chip ${chipFor(x.recommendation)}">${esc(x.recommendation)}</span></td>
       </tr>`).join('')}</tbody>`;
 
-  drawChart('chartPrograms', {
+  drawChart('chartLob', {
     type: 'bar',
     data: {
       labels: p.map((x) => x.businessLine),
@@ -539,7 +634,7 @@ function renderPrograms() {
     }
   });
 
-  drawChart('chartProgScatter', {
+  drawChart('chartLobScatter', {
     type: 'scatter',
     data: {
       datasets: [{
@@ -615,24 +710,56 @@ async function runScenario() {
     S.scenario = r;
     renderScenario(r);
   } catch (e) {
-    $('deltaGrid').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    $('scenHeadline').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    $('waterfall').innerHTML = '';
   }
   btn.disabled = false;
 }
 
 function renderScenario(r) {
-  const d = r.delta;
-  const cell = (l, v, c) =>
-    `<div class="delta"><div class="l">${esc(l)}</div><div class="v ${v >= 0 ? 'win' : 'lose'}">${money(v)}</div><div class="c">${esc(c)}</div></div>`;
+  const up = (n) => (n >= 0 ? 'win' : 'lose');
 
-  $('deltaGrid').innerHTML = [
-    cell('REVENUE CHANGE', d.revenue, `${money(r.baseline.forecastRevenue)} to ${money(r.projected.forecastRevenue)}`),
-    cell('MARGIN CHANGE', d.margin, `${r.baseline.marginRatePct}% to ${r.projected.marginRatePct}% rate`),
-    cell('PROMOTION NET CHANGE', d.promoNetMargin, `${money(r.baseline.promoNetMargin)} to ${money(r.projected.promoNetMargin)}`)
-  ].join('');
+  $('scenHeadline').innerHTML = `
+    <div class="scenhead">
+      <div class="item">
+        <div class="l">Projected revenue</div>
+        <div class="v">${money(r.projected.revenue)}</div>
+        <div class="c ${up(r.delta.revenue)}">${r.delta.revenue >= 0 ? '+' : ''}${money(r.delta.revenue)} vs no change (${pct(r.delta.revenuePct)})</div>
+      </div>
+      <div class="item">
+        <div class="l">Projected margin</div>
+        <div class="v">${money(r.projected.margin)}</div>
+        <div class="c ${up(r.delta.margin)}">${r.delta.margin >= 0 ? '+' : ''}${money(r.delta.margin)} vs no change</div>
+      </div>
+      <div class="item">
+        <div class="l">Margin rate</div>
+        <div class="v">${r.projected.marginRatePct}%</div>
+        <div class="c">from ${r.baseline.marginRatePct}%</div>
+      </div>
+    </div>`;
 
-  $('scenNote').innerHTML = `<b>Combined impact ${money(d.total)}</b> over ${r.horizonMonths} months.` +
-    (r.reallocNote ? `<br>${esc(r.reallocNote)}` : '');
+  const row = (cls, label, basis, rev, mar) => `
+    <div class="wfrow ${cls}">
+      <div>
+        <div class="wflabel">${esc(label)}</div>
+        ${basis ? `<div class="wfbasis">${esc(basis)}</div>` : ''}
+      </div>
+      <div class="wfval ${rev === 0 ? '' : up(rev)}">${rev === 0 ? '\u2014' : (rev > 0 ? '+' : '') + money(rev)}</div>
+      <div class="wfval ${mar === 0 ? '' : up(mar)}">${mar === 0 ? '\u2014' : (mar > 0 ? '+' : '') + money(mar)}</div>
+    </div>`;
+
+  $('waterfall').innerHTML = `
+    <div class="wf">
+      <div class="wfhead"><span>Effect</span><span>Revenue</span><span>Margin</span></div>
+      ${row('base', r.baseline.label, `Seasonal trend projection over ${r.horizonMonths} months`,
+        r.baseline.revenue, r.baseline.margin)}
+      ${r.steps.length
+        ? r.steps.map((st) => row('', st.label, st.basis, st.revenue, st.margin)).join('')
+        : '<div class="wfrow"><div class="wfbasis">No levers set. Move a slider to see its effect.</div><div></div><div></div></div>'}
+      ${row('total', `Projected total`, '', r.projected.revenue, r.projected.margin)}
+    </div>`;
+
+  $('scenAssume').innerHTML = '<b>Assumptions:</b> ' + r.assumptions.map(esc).join(' ');
 }
 
 async function explainScenario() {
@@ -1039,9 +1166,11 @@ function wire() {
       $('tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === `v-${b.dataset.v}`));
       location.hash = b.dataset.v;
-      if (b.dataset.v === 'data') { fillAddForm(); loadData(); loadAudit(); }
-      if (b.dataset.v === 'admin') { loadUsers(); loadAiLog(); loadDataStatus(); }
-      if (b.dataset.v === 'scenario') loadScenarios();
+      if (b.dataset.v === 'admin') {
+        fillAddForm(); loadData(); loadAudit();
+        if (S.user.role === 'admin') { loadUsers(); loadAiLog(); loadDataStatus(); }
+      }
+      if (b.dataset.v === 'scenario') { loadScenarios(); runScenario(); }
     };
   });
   const hash = location.hash.replace('#', '');
@@ -1060,7 +1189,8 @@ function wire() {
   $('btnReset').onclick = async () => {
     $('fInst').value = 'all'; $('fBL').value = 'all';
     $('fFrom').value = ''; $('fTo').value = '';
-    S.channelFilter.clear();
+    S.promoFilter = { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' };
+    S.selectedCampaign = null;
     await refresh();
   };
 
@@ -1079,11 +1209,23 @@ function wire() {
     $(slider).oninput = upd;
     upd();
   };
-  bind('sDemand', 'vDemand', (v) => `${v > 0 ? '+' : ''}${v}%`);
-  bind('sMargin', 'vMargin', (v) => `${v > 0 ? '+' : ''}${Number(v).toFixed(1)} pts`);
-  bind('sPromo', 'vPromo', (v) => `${v > 0 ? '+' : ''}${v}%`);
+  const noneIfZero = (v, fmt) => (Number(v) === 0 ? 'no change' : fmt(v));
+  bind('sDemand', 'vDemand', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${x}%`));
+  bind('sMargin', 'vMargin', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${Number(x).toFixed(1)} points`));
+  bind('sPromo', 'vPromo', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${x}%`));
   $('btnRunScenario').onclick = runScenario;
   $('btnExplainScenario').onclick = explainScenario;
+  $('btnResetScenario').onclick = () => {
+    $('sDemand').value = 0; $('sMargin').value = 0; $('sPromo').value = 0;
+    $('sRealloc').checked = false;
+    ['sDemand', 'sMargin', 'sPromo'].forEach((id) => $(id).dispatchEvent(new Event('input')));
+    runScenario();
+  };
+  // Live update, so moving a lever shows its effect without a second click.
+  ['sDemand', 'sMargin', 'sPromo'].forEach((id) => {
+    $(id).addEventListener('change', runScenario);
+  });
+  $('sRealloc').addEventListener('change', runScenario);
   $('btnSaveScenario').onclick = async () => {
     const name = prompt('Name this scenario');
     if (!name) return;
@@ -1173,6 +1315,13 @@ function wire() {
       userMsg('User created.', 'ok');
       loadUsers();
     } catch (e) { userMsg(e.message, 'err'); }
+  };
+
+  $('btnClearPromo').onclick = () => {
+    S.promoFilter = { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' };
+    S.selectedCampaign = null;
+    renderPromoFilters();
+    renderPromo();
   };
 
   $('btnLoadData').onclick = () => doLoadData(false);

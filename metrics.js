@@ -142,14 +142,14 @@ function channelRollup(campaigns) {
     .sort((a, b) => a.roiPct - b.roiPct);
 }
 
-/** ---------- Program / portfolio ROI (the LOE 1 view) ---------- */
+/** ---------- Lines of business (the LOE 1 view) ---------- */
 
 /**
  * Cost-to-serve proxy: for each business line we hold revenue, margin, margin rate,
  * trend, and promo efficiency together so leadership can make a
  * sustain / scale / sunset call per program.
  */
-function programPortfolio(rows, campaigns, months) {
+function linesOfBusiness(rows, campaigns, months) {
   const lines = [...new Set(rows.map((r) => r.business_line))];
   const half = Math.max(1, Math.floor(months.length / 2));
   const recentMonths = new Set(months.slice(-half));
@@ -330,7 +330,7 @@ function anomalies(rows, months, z = 2) {
  * Turns the analysis into dollars. These are the numbers that justify the
  * engagement, so each one carries its own basis string.
  */
-function opportunities(campaigns, channels, installs, programs, forecastTotal) {
+function opportunities(campaigns, channels, installs, lines, forecastTotal) {
   const losing = campaigns.filter((c) => !c.profitable);
   const wastedSpend = sum(losing.map((c) => c.spend - c.incrementalMargin));
   const bestChannel = channels[channels.length - 1];
@@ -398,84 +398,177 @@ function formatMoney(n) {
 /** ---------- Enterprise scorecard (the LOE 4 anchor) ---------- */
 
 /**
- * Rolls program-level measures up to the three MCCS enterprise objectives.
- * This is the structural answer to "we lack the means to prove we are
- * meeting defined objectives".
+ * Every measure here is compared against a baseline drawn from the data
+ * itself: the same month a year ago, the trailing twelve month average, or
+ * break-even. No target is invented, because an invented target is the first
+ * thing a room full of analysts will challenge and the hardest to defend.
+ *
+ * Objective 1 is deliberately left uninstrumented. Leadership endorsement
+ * cannot be measured from sales data, and showing it as a gap is more honest,
+ * and a stronger argument for the engagement, than inventing a proxy.
  */
-function scorecard(rows, months, campaigns, installs, programs) {
+function scorecard(rows, months, campaigns, installs, lines) {
   const latest = months[months.length - 1];
-  const prev = months[months.length - 2];
+  const prior = months[months.length - 2] || null;
   const yearAgo = months.length >= 13 ? months[months.length - 13] : null;
 
-  const revAt = (m) => round(sum(rows.filter((r) => r.period === m).map((r) => r.revenue)));
-  const marAt = (m) => round(sum(rows.filter((r) => r.period === m).map((r) => r.gross_margin)));
+  const inMonth = (m) => rows.filter((r) => r.period === m);
+  const agg = (m, field) => round(sum(inMonth(m).map((r) => r[field])));
 
-  const revLatest = revAt(latest);
-  const revPrev = prev ? revAt(prev) : 0;
-  const revYear = yearAgo ? revAt(yearAgo) : 0;
-  const marLatest = marAt(latest);
+  // Trailing twelve months, excluding the latest, so a month is never
+  // compared against a window that already contains it.
+  const trailing = months.slice(Math.max(0, months.length - 13), months.length - 1);
+  const trailingAvg = (field) => {
+    if (!trailing.length) return null;
+    return round(sum(trailing.map((m) => agg(m, field))) / trailing.length);
+  };
 
-  const profitable = campaigns.filter((c) => c.profitable).length;
+  const revLatest = agg(latest, 'revenue');
+  const marLatest = agg(latest, 'gross_margin');
+  const txnLatest = agg(latest, 'transactions');
+  const unitsLatest = agg(latest, 'units_sold');
+
+  const kpi = ({ label, value, unit, baseline, baselineLabel, higherIsBetter = true, note = null }) => {
+    const hasBaseline = baseline != null && !Number.isNaN(baseline);
+    const deltaPct = hasBaseline && baseline !== 0
+      ? round(((value - baseline) / Math.abs(baseline)) * 100, 1) : null;
+    return {
+      label,
+      value: round(value, 2),
+      unit,
+      baseline: hasBaseline ? round(baseline, 2) : null,
+      baselineLabel,
+      deltaPct,
+      higherIsBetter,
+      note,
+      onTrack: hasBaseline ? (higherIsBetter ? value >= baseline : value <= baseline) : null
+    };
+  };
+
+  const objectives = [];
+
+  // ---- Objective 1: not measurable from this data ----
+  objectives.push({
+    id: 'obj1',
+    title: 'Leadership will embrace MCCS',
+    instrumented: false,
+    gap: 'No data source in this system measures leadership attitudes or endorsement.',
+    needed: [
+      'A recurring command survey of leadership perception',
+      'Endorsement or referral tracking through command channels',
+      'Programs briefed to leadership, with outcomes recorded'
+    ],
+    kpis: []
+  });
+
+  // ---- Objective 2: patron relevancy ----
+  const atvLatest = txnLatest ? revLatest / txnLatest : 0;
+  const trailingRev = trailingAvg('revenue');
+  const trailingTxn = trailingAvg('transactions');
+  const avgAtv = (() => {
+    if (!trailing.length) return null;
+    const r = sum(trailing.map((m) => agg(m, 'revenue')));
+    const t = sum(trailing.map((m) => agg(m, 'transactions')));
+    return t ? r / t : null;
+  })();
+
+  objectives.push({
+    id: 'obj2',
+    title: 'MCCS will be relevant to Marines and families',
+    instrumented: true,
+    basis: 'Patron demand as revealed by revenue, visit volume, and basket size',
+    kpis: [
+      kpi({
+        label: 'Revenue',
+        value: revLatest,
+        unit: 'usd',
+        baseline: yearAgo ? agg(yearAgo, 'revenue') : trailingRev,
+        baselineLabel: yearAgo ? `same month last year (${yearAgo.slice(0, 7)})` : 'trailing 12 month average'
+      }),
+      kpi({
+        label: 'Transactions',
+        value: txnLatest,
+        unit: 'count',
+        baseline: trailingTxn,
+        baselineLabel: 'trailing 12 month average',
+        note: 'Visit volume, independent of price'
+      }),
+      kpi({
+        label: 'Average transaction value',
+        value: atvLatest,
+        unit: 'usd2',
+        baseline: avgAtv,
+        baselineLabel: 'trailing 12 month average',
+        note: 'What a patron spends per visit'
+      })
+    ]
+  });
+
+  // ---- Objective 3: resource efficiency ----
+  const marginRate = revLatest ? (marLatest / revLatest) * 100 : 0;
+  const trailingMarginRate = (() => {
+    if (!trailing.length) return null;
+    const r = sum(trailing.map((m) => agg(m, 'revenue')));
+    const g = sum(trailing.map((m) => agg(m, 'gross_margin')));
+    return r ? (g / r) * 100 : null;
+  })();
+
   const promoSpend = sum(campaigns.map((c) => c.spend));
   const promoMargin = sum(campaigns.map((c) => c.incrementalMargin));
   const blendedRoi = promoSpend ? ((promoMargin - promoSpend) / promoSpend) * 100 : 0;
-  const growing = installs.filter((i) => i.growthPct > 0).length;
-  const scaleReady = programs.filter((p) => p.recommendation === 'Scale').length;
-  const needsReview = programs.filter((p) => p.recommendation !== 'Sustain' && p.recommendation !== 'Scale').length;
+  const earningSpend = sum(campaigns.filter((c) => c.profitable).map((c) => c.spend));
+  const earningShare = promoSpend ? (earningSpend / promoSpend) * 100 : 0;
 
-  const kpi = (label, value, unit, target, higherIsBetter = true) => {
-    const onTrack = higherIsBetter ? value >= target : value <= target;
-    return { label, value: round(value, 1), unit, target, onTrack };
-  };
+  objectives.push({
+    id: 'obj3',
+    title: 'Resources aligned for efficient, sustainable service',
+    instrumented: true,
+    basis: 'Margin performance and the return on promotional investment',
+    kpis: [
+      kpi({
+        label: 'Gross margin rate',
+        value: marginRate,
+        unit: 'pct',
+        baseline: trailingMarginRate,
+        baselineLabel: 'trailing 12 month average'
+      }),
+      kpi({
+        label: 'Blended promotion ROI',
+        value: blendedRoi,
+        unit: 'pct',
+        baseline: 0,
+        baselineLabel: 'break-even, where margin equals spend',
+        note: 'Below zero means promotions cost more than they returned'
+      }),
+      kpi({
+        label: 'Promotion spend that returned its cost',
+        value: earningShare,
+        unit: 'pct',
+        baseline: 100,
+        baselineLabel: 'all spend earning its cost',
+        note: `${formatMoney(promoSpend - earningSpend)} did not`
+      })
+    ]
+  });
 
-  const objectives = [
-    {
-      id: 'obj1',
-      title: 'Leadership will embrace MCCS',
-      note: 'Measured through decision-grade reporting coverage and evidence available to leadership',
-      kpis: [
-        kpi('Installations with current reporting', installs.length, 'count', installs.length),
-        kpi('Programs with a documented investment recommendation', programs.length, 'count', programs.length),
-        kpi('Months of history under measurement', months.length, 'months', 12)
-      ]
-    },
-    {
-      id: 'obj2',
-      title: 'MCCS will be relevant to Marines and families',
-      note: 'Patron demand as revealed by revenue, transactions, and promotion response',
-      kpis: [
-        kpi('Revenue, latest month', revLatest, 'usd', revPrev),
-        kpi('Month over month change', revPrev ? ((revLatest - revPrev) / revPrev) * 100 : 0, 'pct', 0),
-        kpi('Year over year change', revYear ? ((revLatest - revYear) / revYear) * 100 : 0, 'pct', 0),
-        kpi('Installations growing', growing, 'count', Math.ceil(installs.length / 2))
-      ]
-    },
-    {
-      id: 'obj3',
-      title: 'Resources aligned for efficient, sustainable service',
-      note: 'Margin performance and the return on promotional investment',
-      kpis: [
-        kpi('Gross margin rate', revLatest ? (marLatest / revLatest) * 100 : 0, 'pct', 25),
-        kpi('Blended promotion ROI', blendedRoi, 'pct', 0),
-        kpi('Campaigns returning their cost', campaigns.length ? (profitable / campaigns.length) * 100 : 0, 'pct', 70),
-        kpi('Programs flagged for review', needsReview, 'count', 0, false)
-      ]
-    }
-  ];
-
-  const all = objectives.flatMap((o) => o.kpis);
-  const onTrack = all.filter((k) => k.onTrack).length;
+  const measured = objectives.flatMap((o) => o.kpis);
+  const onTrack = measured.filter((k) => k.onTrack).length;
+  const instrumented = objectives.filter((o) => o.instrumented).length;
 
   return {
     latestPeriod: latest,
+    priorPeriod: prior,
+    comparedWith: yearAgo ? `${yearAgo.slice(0, 7)} and the trailing 12 months` : 'the trailing 12 months',
     objectives,
     summary: {
-      kpiCount: all.length,
+      kpiCount: measured.length,
       onTrack,
-      offTrack: all.length - onTrack,
-      healthPct: all.length ? round((onTrack / all.length) * 100, 0) : 0,
-      scaleReady,
-      needsReview
+      offTrack: measured.length - onTrack,
+      healthPct: measured.length ? round((onTrack / measured.length) * 100, 0) : 0,
+      objectivesInstrumented: instrumented,
+      objectivesTotal: objectives.length,
+      scaleReady: lines.filter((p) => p.recommendation === 'Scale').length,
+      needsReview: lines.filter((p) => p.recommendation !== 'Sustain' && p.recommendation !== 'Scale').length
     }
   };
 }
@@ -483,76 +576,152 @@ function scorecard(rows, months, campaigns, installs, programs) {
 /** ---------- What-if scenario ---------- */
 
 /**
- * Applies leadership-style levers to the current baseline and reports the delta.
- * Deliberately transparent arithmetic. Nothing here is a black box.
+ * One revenue line, built up from named contributions.
+ *
+ * Demand and promotion both move revenue, so they are added to the same
+ * projection rather than reported in separate columns. The result is a
+ * waterfall the reader can follow: baseline, then each lever's effect on
+ * revenue and on margin, then the total.
+ *
+ * Promotion effect is derived from the campaigns' own revenue return per
+ * dollar of spend, so it is grounded in observed performance rather than an
+ * assumed multiplier.
  */
 function scenario(rows, months, campaigns, params = {}) {
   const {
-    demandShiftPct = 0,        // overall demand change
-    marginRateDeltaPts = 0,    // change in gross margin rate, percentage points
-    promoBudgetChangePct = 0,  // change to total promo spend
-    reallocateLosingSpend = false, // move negative-ROI spend to the best channel
+    demandShiftPct = 0,
+    marginRateDeltaPts = 0,
+    promoBudgetChangePct = 0,
+    reallocateLosingSpend = false,
     horizonMonths = 3
   } = params;
 
   const revSeries = seriesFor(rows, months, 'revenue');
   const marSeries = seriesFor(rows, months, 'gross_margin');
   const f = forecast(revSeries, horizonMonths);
-  const baseForecast = sum(f.points.map((p) => p.value));
 
-  const baseRevenue = sum(revSeries);
-  const baseMargin = sum(marSeries);
-  const baseMarginRate = baseRevenue ? (baseMargin / baseRevenue) * 100 : 0;
+  const baseRevenue = sum(f.points.map((p) => p.value));
+  const histRevenue = sum(revSeries);
+  const histMargin = sum(marSeries);
+  const baseMarginRate = histRevenue ? (histMargin / histRevenue) * 100 : 0;
+  const baseMargin = baseRevenue * (baseMarginRate / 100);
 
-  const projRevenue = baseForecast * (1 + demandShiftPct / 100);
-  const projMarginRate = baseMarginRate + marginRateDeltaPts;
-  const projMargin = projRevenue * (projMarginRate / 100);
-  const baseForecastMargin = baseForecast * (baseMarginRate / 100);
+  // Observed promotion economics, expressed per month so they can be scaled
+  // to the forecast horizon.
+  const monthsCovered = months.length || 1;
+  const promoSpendTotal = sum(campaigns.map((c) => c.spend));
+  const promoIncrRevenue = sum(campaigns.map((c) => c.incrementalRevenue));
+  const promoIncrMargin = sum(campaigns.map((c) => c.incrementalMargin));
+  const revenuePerPromoDollar = promoSpendTotal ? promoIncrRevenue / promoSpendTotal : 0;
+  const marginPerPromoDollar = promoSpendTotal ? promoIncrMargin / promoSpendTotal : 0;
 
-  const channels = channelRollup(campaigns);
-  const best = channels[channels.length - 1];
-  const losing = campaigns.filter((c) => !c.profitable);
-  const losingSpend = sum(losing.map((c) => c.spend));
-  const currentPromoSpend = sum(campaigns.map((c) => c.spend));
-  const currentPromoMargin = sum(campaigns.map((c) => c.incrementalMargin));
+  const promoSpendHorizon = (promoSpendTotal / monthsCovered) * horizonMonths;
 
-  let promoSpend = currentPromoSpend * (1 + promoBudgetChangePct / 100);
-  let promoMargin = currentPromoMargin * (1 + promoBudgetChangePct / 100);
-  let reallocNote = null;
-  if (reallocateLosingSpend && best && losingSpend > 0) {
-    const recovered = sum(losing.map((c) => c.spend - c.incrementalMargin));
-    const redeployed = losingSpend * (1 + best.roiPct / 100);
-    promoMargin = promoMargin - sum(losing.map((c) => c.incrementalMargin)) + redeployed;
-    reallocNote = `${formatMoney(losingSpend)} moved from ${losing.length} negative-ROI campaigns into ${best.channel} at ${best.roiPct}% ROI, recovering ${formatMoney(recovered)} of loss`;
+  const steps = [];
+
+  // 1. Demand
+  const demandRevenue = baseRevenue * (demandShiftPct / 100);
+  const demandMargin = demandRevenue * (baseMarginRate / 100);
+  if (demandShiftPct !== 0) {
+    steps.push({
+      key: 'demand',
+      label: `Demand ${demandShiftPct > 0 ? 'up' : 'down'} ${Math.abs(demandShiftPct)}%`,
+      revenue: round(demandRevenue),
+      margin: round(demandMargin),
+      basis: `applied to the ${formatMoney(baseRevenue)} baseline projection`
+    });
   }
 
-  const baseNet = currentPromoMargin - currentPromoSpend;
-  const projNet = promoMargin - promoSpend;
+  // 2. Promotion budget. Extra spend buys extra revenue at the rate the
+  //    existing campaigns actually achieved.
+  const extraSpend = promoSpendHorizon * (promoBudgetChangePct / 100);
+  const promoRevenue = extraSpend * revenuePerPromoDollar;
+  const promoMarginGross = extraSpend * marginPerPromoDollar;
+  const promoMarginNet = promoMarginGross - extraSpend;
+  if (promoBudgetChangePct !== 0) {
+    steps.push({
+      key: 'promo',
+      label: `Promotion budget ${promoBudgetChangePct > 0 ? 'up' : 'down'} ${Math.abs(promoBudgetChangePct)}%`,
+      revenue: round(promoRevenue),
+      margin: round(promoMarginNet),
+      basis: `${formatMoney(Math.abs(extraSpend))} ${extraSpend >= 0 ? 'added to' : 'removed from'} promotion spend, at the ${revenuePerPromoDollar.toFixed(2)} revenue per dollar these campaigns returned`
+    });
+  }
+
+  // 3. Reallocation. Spend does not change, only where it goes.
+  const losing = campaigns.filter((c) => !c.profitable);
+  const losingSpend = sum(losing.map((c) => c.spend));
+  const losingMargin = sum(losing.map((c) => c.incrementalMargin));
+  const channels = channelRollup(campaigns);
+  const best = channels[channels.length - 1];
+  let reallocRevenue = 0;
+  let reallocMargin = 0;
+  if (reallocateLosingSpend && best && losingSpend > 0) {
+    const bestCamps = campaigns.filter((c) => c.channel === best.channel);
+    const bestSpend = sum(bestCamps.map((c) => c.spend));
+    const bestRevPerDollar = bestSpend ? sum(bestCamps.map((c) => c.incrementalRevenue)) / bestSpend : 0;
+    const bestMarginPerDollar = bestSpend ? sum(bestCamps.map((c) => c.incrementalMargin)) / bestSpend : 0;
+
+    const share = promoSpendTotal ? losingSpend / promoSpendTotal : 0;
+    const losingSpendHorizon = promoSpendHorizon * share;
+    const losingRevenueHorizon = (sum(losing.map((c) => c.incrementalRevenue)) / monthsCovered) * horizonMonths;
+    const losingMarginHorizon = (losingMargin / monthsCovered) * horizonMonths;
+
+    reallocRevenue = losingSpendHorizon * bestRevPerDollar - losingRevenueHorizon;
+    reallocMargin = losingSpendHorizon * bestMarginPerDollar - losingMarginHorizon;
+
+    steps.push({
+      key: 'realloc',
+      label: `Move losing spend into ${best.channel}`,
+      revenue: round(reallocRevenue),
+      margin: round(reallocMargin),
+      basis: `${formatMoney(losingSpendHorizon)} currently in ${losing.length} campaigns that do not return their cost, redirected at ${best.channel}'s observed return`
+    });
+  }
+
+  const projRevenue = baseRevenue + demandRevenue + promoRevenue + reallocRevenue;
+
+  // 4. Margin rate change applies to the whole projected revenue line.
+  const rateMargin = projRevenue * (marginRateDeltaPts / 100);
+  if (marginRateDeltaPts !== 0) {
+    steps.push({
+      key: 'rate',
+      label: `Margin rate ${marginRateDeltaPts > 0 ? 'up' : 'down'} ${Math.abs(marginRateDeltaPts)} points`,
+      revenue: 0,
+      margin: round(rateMargin),
+      basis: `applied to ${formatMoney(projRevenue)} of projected revenue`
+    });
+  }
+
+  const projMargin = baseMargin + demandMargin + promoMarginNet + reallocMargin + rateMargin;
 
   return {
     horizonMonths,
     params,
     baseline: {
-      forecastRevenue: round(baseForecast),
-      forecastMargin: round(baseForecastMargin),
+      revenue: round(baseRevenue),
+      margin: round(baseMargin),
       marginRatePct: round(baseMarginRate, 1),
-      promoSpend: round(currentPromoSpend),
-      promoNetMargin: round(baseNet)
+      promoSpend: round(promoSpendHorizon),
+      label: `Projected ${horizonMonths} months with no change`
     },
+    steps,
     projected: {
-      forecastRevenue: round(projRevenue),
-      forecastMargin: round(projMargin),
-      marginRatePct: round(projMarginRate, 1),
-      promoSpend: round(promoSpend),
-      promoNetMargin: round(projNet)
+      revenue: round(projRevenue),
+      margin: round(projMargin),
+      marginRatePct: projRevenue ? round((projMargin / projRevenue) * 100, 1) : 0,
+      promoSpend: round(promoSpendHorizon + extraSpend)
     },
     delta: {
-      revenue: round(projRevenue - baseForecast),
-      margin: round(projMargin - baseForecastMargin),
-      promoNetMargin: round(projNet - baseNet),
-      total: round((projMargin - baseForecastMargin) + (projNet - baseNet))
+      revenue: round(projRevenue - baseRevenue),
+      margin: round(projMargin - baseMargin),
+      revenuePct: baseRevenue ? round(((projRevenue - baseRevenue) / baseRevenue) * 100, 1) : 0
     },
-    reallocNote
+    assumptions: [
+      'Promotion return per dollar is taken from the campaigns in this selection and held constant.',
+      'Cost structure, staffing, and patron mix are unchanged.',
+      'Directional planning figures, not a budget.'
+    ]
   };
 }
 
@@ -569,12 +738,12 @@ function buildDigest(rows, campaignRows, filters = {}) {
   const marSeries = seriesFor(rows, months, 'gross_margin');
   const f = forecast(revSeries, 3);
   const installs = installationRollup(rows, months);
-  const programs = programPortfolio(rows, campaigns, months);
+  const lines = linesOfBusiness(rows, campaigns, months);
   const channels = channelRollup(campaigns);
   const anoms = anomalies(rows, months);
   const forecastTotal = sum(f.points.map((p) => p.value));
-  const opps = opportunities(campaigns, channels, installs, programs, forecastTotal);
-  const card = scorecard(rows, months, campaigns, installs, programs);
+  const opps = opportunities(campaigns, channels, installs, lines, forecastTotal);
+  const card = scorecard(rows, months, campaigns, installs, lines);
 
   const last = months[months.length - 1];
   const prev = months[months.length - 2];
@@ -622,7 +791,7 @@ function buildDigest(rows, campaignRows, filters = {}) {
       monthlyTrend: f.slope
     },
     installations: installs,
-    programs,
+    linesOfBusiness: lines,
     channels,
     campaigns: {
       total: campaigns.length,
@@ -640,7 +809,7 @@ function buildDigest(rows, campaignRows, filters = {}) {
 
 module.exports = {
   monthsOf, seriesFor, forecast, addMonths,
-  campaignMetrics, channelRollup, programPortfolio, installationRollup,
+  campaignMetrics, channelRollup, linesOfBusiness, installationRollup,
   anomalies, opportunities, scorecard, scenario, buildDigest,
   formatMoney, round, sum
 };

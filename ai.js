@@ -185,13 +185,21 @@ router.post('/scenario', async (req, res, next) => {
     const months = M.monthsOf(sales);
     const result = M.scenario(sales, months, camps.map(M.campaignMetrics), req.body.params || {});
 
-    const prompt = `Explain what this what-if scenario means for the next ${result.horizonMonths} months. Three sentences. State the margin impact in dollars, name the biggest single driver, and give one caution about what the model does not account for.
+    const prompt = `Explain what this scenario means for the next ${result.horizonMonths} months in three or four sentences.
+
+State the revenue and margin impact in dollars against the no-change baseline, name which lever contributed most and why, and close with one caution drawn from the assumptions listed. The steps array is a waterfall: each entry is one lever's separate effect on revenue and on margin, and they sum to the projected total.
 
 Scenario: ${JSON.stringify(result, null, 1)}`;
 
     const out = await runAi({
       req, kind: 'scenario', prompt,
-      fallback: () => `This scenario moves projected margin by ${money(result.delta.margin)} and promotion net margin by ${money(result.delta.promoNetMargin)}, for a combined ${money(result.delta.total)} over ${result.horizonMonths} months. ${result.reallocNote || 'The change is driven by the demand and margin rate assumptions you set.'} The model holds cost structure and patron mix constant, so treat it as directional rather than a budget figure.`
+      fallback: () => {
+        if (!result.steps.length) {
+          return `No levers are set, so the projection is unchanged at ${money(result.baseline.revenue)} of revenue and ${money(result.baseline.margin)} of margin over ${result.horizonMonths} months.`;
+        }
+        const biggest = [...result.steps].sort((a, b) => Math.abs(b.margin) - Math.abs(a.margin))[0];
+        return `This scenario moves projected revenue by ${money(result.delta.revenue)} (${pct(result.delta.revenuePct)}) and margin by ${money(result.delta.margin)} over ${result.horizonMonths} months, ending at ${money(result.projected.revenue)} revenue and ${money(result.projected.margin)} margin.\n\nThe largest single effect is "${biggest.label}" at ${money(biggest.margin)} of margin, ${biggest.basis}.\n\n${result.assumptions.join(' ')}`;
+      }
     });
     res.json({ ...out, scenario: result });
   } catch (e) { next(e); }
@@ -203,20 +211,33 @@ router.post('/scorecard', async (req, res, next) => {
     const d = await digestFor(req.body.filters);
     if (!d) return res.status(400).json({ error: 'No data for those filters' });
 
-    const prompt = `Write a short narrative for this enterprise scorecard. One paragraph per objective, each naming the KPIs that are on track and the ones that are not, and what would have to change to move an off-track KPI. Close with one sentence on overall measurement health.
+    const prompt = `Write a short narrative for this enterprise scorecard. One paragraph per objective.
+
+For an objective marked instrumented false, say plainly that it cannot be measured from the data available and name what would be needed. Do not invent a proxy measure for it.
+
+For the others, name which measures are ahead of their baseline and which are behind, always stating what the baseline is (the same month last year, the trailing twelve month average, or break-even), and say what would have to change to move a measure that is behind.
+
+Close with one sentence on how much of the enterprise can actually be measured today.
 
 Scorecard: ${JSON.stringify(d.scorecard, null, 1)}
-Supporting programs: ${JSON.stringify(d.programs, null, 1)}`;
+Supporting lines of business: ${JSON.stringify(d.linesOfBusiness, null, 1)}`;
 
     const out = await runAi({
       req, kind: 'scorecard', prompt,
       fallback: () => {
-        const s = d.scorecard;
-        const lines = s.objectives.map((o) => {
-          const off = o.kpis.filter((k) => !k.onTrack).map((k) => k.label);
-          return `${o.title}: ${o.kpis.length - off.length} of ${o.kpis.length} measures on track.${off.length ? ` Off track: ${off.join(', ')}.` : ''}`;
+        const sc = d.scorecard;
+        const parts = sc.objectives.map((o) => {
+          if (!o.instrumented) {
+            return `${o.title}: not measurable from the data in this system. ${o.gap} Closing it would require ${o.needed[0].toLowerCase()}.`;
+          }
+          const off = o.kpis.filter((k) => !k.onTrack);
+          const on = o.kpis.filter((k) => k.onTrack);
+          let t = `${o.title}: ${on.length} of ${o.kpis.length} measures ahead of their own baseline.`;
+          if (on.length) t += ` Ahead: ${on.map((k) => `${k.label} (${pct(k.deltaPct)} vs ${k.baselineLabel})`).join(', ')}.`;
+          if (off.length) t += ` Behind: ${off.map((k) => `${k.label} (${pct(k.deltaPct)} vs ${k.baselineLabel})`).join(', ')}.`;
+          return t;
         });
-        return `${lines.join('\n\n')}\n\nOverall measurement health is ${s.summary.healthPct}%, with ${s.summary.onTrack} of ${s.summary.kpiCount} KPIs on track.`;
+        return `${parts.join('\n\n')}\n\nAcross the measures that can be computed today, ${sc.summary.onTrack} of ${sc.summary.kpiCount} are ahead of their own baseline. ${sc.summary.objectivesInstrumented} of the ${sc.summary.objectivesTotal} enterprise objectives can be measured from the data in this system.`;
       }
     });
     res.json({ ...out, scorecard: d.scorecard });
@@ -278,13 +299,13 @@ function fallbackAnswer(question, d) {
   }
   if (has('scorecard', 'objective', 'measure', 'kpi', 'loe')) {
     const sc = d.scorecard;
-    return `Measurement health is ${sc.summary.healthPct}%, with ${sc.summary.onTrack} of ${sc.summary.kpiCount} KPIs on track across the three enterprise objectives. ${sc.summary.scaleReady} programs are ready to scale and ${sc.summary.needsReview} need review.`;
+    return `Measurement health is ${sc.summary.healthPct}%, with ${sc.summary.onTrack} of ${sc.summary.kpiCount} KPIs on track across the three enterprise objectives. ${sc.summary.scaleReady} lines of business are ready to scale and ${sc.summary.needsReview} need review.`;
   }
-  if (has('program', 'portfolio', 'sunset', 'invest')) {
-    const p = d.programs;
+  if (has('line of business', 'lines of business', 'program', 'portfolio', 'sunset', 'invest')) {
+    const p = d.linesOfBusiness;
     const scale = p.filter((x) => x.recommendation === 'Scale').map((x) => x.businessLine);
     const review = p.filter((x) => x.recommendation !== 'Sustain' && x.recommendation !== 'Scale').map((x) => x.businessLine);
-    return `Across ${p.length} programs, ${scale.length ? scale.join(' and ') + ' ' + (scale.length > 1 ? 'are' : 'is') + ' recommended to scale' : 'none are flagged to scale'}. ${review.length ? review.join(' and ') + ' ' + (review.length > 1 ? 'need' : 'needs') + ' review.' : 'No programs are flagged for review.'} The largest by revenue is ${p[0].businessLine} at ${money(p[0].revenue)} and a ${p[0].marginRatePct}% margin rate.`;
+    return `Across ${p.length} lines of business, ${scale.length ? scale.join(' and ') + ' ' + (scale.length > 1 ? 'are' : 'is') + ' recommended to scale' : 'none are flagged to scale'}. ${review.length ? review.join(' and ') + ' ' + (review.length > 1 ? 'need' : 'needs') + ' review.' : 'No lines of business are flagged for review.'} The largest by revenue is ${p[0].businessLine} at ${money(p[0].revenue)} and a ${p[0].marginRatePct}% margin rate.`;
   }
   if (has('anomal', 'unusual', 'spike', 'drop', 'outlier')) {
     if (!d.anomalies.length) return 'No movements exceeded two standard deviations in this selection.';
@@ -307,7 +328,7 @@ function fallbackAnswer(question, d) {
     const w = d.campaigns.worst[0], b = d.campaigns.best[0];
     return `${d.campaigns.profitable} of ${d.campaigns.total} campaigns return their cost, on ${money(d.campaigns.totalSpend)} of total spend. Weakest is ${w.name} at ${pct(w.roiPct)} on ${money(w.spend)}. Strongest is ${b.name} at ${pct(b.roiPct)}.`;
   }
-  return `Latest month revenue was ${money(d.headline.latestRevenue)} (${pct(d.headline.momPct)} month over month, ${pct(d.headline.yoyPct)} year over year), with ${d.campaigns.profitable} of ${d.campaigns.total} campaigns returning their cost and ${money(d.opportunities.totalAddressable)} of addressable opportunity identified. Ask about installations, channels, campaigns, programs, anomalies, the forecast, or the scorecard for specifics.`;
+  return `Latest month revenue was ${money(d.headline.latestRevenue)} (${pct(d.headline.momPct)} month over month, ${pct(d.headline.yoyPct)} year over year), with ${d.campaigns.profitable} of ${d.campaigns.total} campaigns returning their cost and ${money(d.opportunities.totalAddressable)} of addressable opportunity identified. Ask about installations, channels, campaigns, lines of business, anomalies, the forecast, or the scorecard for specifics.`;
 }
 
 module.exports = router;
