@@ -37,9 +37,12 @@ async function loadSales(filters = {}) {
            i.name AS installation,
            c.business_line,
            c.category,
+           s.transactions,
+           s.units_sold,
            s.revenue::float8       AS revenue,
+           s.cogs::float8          AS cogs,
            s.gross_margin::float8  AS gross_margin,
-           s.units,
+           s.inventory_units,
            s.source,
            s.updated_at
     FROM sales_fact s
@@ -69,10 +72,12 @@ async function loadCampaigns(filters = {}) {
   const { rows } = await q(
     `SELECT id, code, name, channel, installation, business_line,
             TO_CHAR(start_date,'YYYY-MM-DD') AS start_date,
+            TO_CHAR(end_date,'YYYY-MM-DD') AS end_date,
             spend::float8 AS spend,
             markdown_pct::float8 AS markdown_pct,
             baseline_revenue::float8 AS baseline_revenue,
             promo_revenue::float8 AS promo_revenue,
+            margin_rate_pct::float8 AS margin_rate_pct,
             incremental_margin::float8 AS incremental_margin,
             status
      FROM campaigns
@@ -186,7 +191,8 @@ router.get('/sales', async (req, res, next) => {
     const pageSize = Math.min(500, Math.max(10, Number(req.query.pageSize) || 50));
     const rows = await loadSales(filters);
 
-    const sortKey = ['period', 'installation', 'business_line', 'category', 'revenue', 'gross_margin', 'units']
+    const sortKey = ['period', 'installation', 'business_line', 'category',
+      'transactions', 'units_sold', 'revenue', 'cogs', 'gross_margin', 'inventory_units']
       .includes(req.query.sort) ? req.query.sort : 'period';
     const dir = req.query.dir === 'desc' ? -1 : 1;
     rows.sort((a, b) => {
@@ -205,8 +211,10 @@ router.get('/sales', async (req, res, next) => {
       totalPages: Math.ceil(total / pageSize),
       totals: {
         revenue: M.round(M.sum(rows.map((r) => r.revenue))),
+        cogs: M.round(M.sum(rows.map((r) => r.cogs))),
         margin: M.round(M.sum(rows.map((r) => r.gross_margin))),
-        units: M.sum(rows.map((r) => r.units))
+        transactions: M.sum(rows.map((r) => r.transactions)),
+        unitsSold: M.sum(rows.map((r) => r.units_sold))
       }
     });
   } catch (e) { next(e); }
@@ -215,7 +223,8 @@ router.get('/sales', async (req, res, next) => {
 router.post('/sales', async (req, res, next) => {
   if (!canWrite(req)) return denyReadOnly(res);
   try {
-    const { period, installation, business_line, category, revenue, gross_margin, units } = req.body;
+    const { period, installation, business_line, category,
+            transactions, units_sold, revenue, cogs, inventory_units } = req.body;
     if (!period || !installation || !business_line || !category) {
       return res.status(400).json({ error: 'period, installation, business_line and category are required' });
     }
@@ -225,16 +234,24 @@ router.post('/sales', async (req, res, next) => {
       [business_line, category]);
     if (!cat.rows[0]) return res.status(400).json({ error: `Unknown category: ${business_line} / ${category}` });
 
+    const rev = Number(revenue) || 0;
+    const cost = Number(cogs) || 0;
     const { rows } = await q(
-      `INSERT INTO sales_fact (period, installation_id, category_id, revenue, gross_margin, units, source, updated_by)
-       VALUES ($1,$2,$3,$4,$5,$6,'manual',$7)
+      `INSERT INTO sales_fact
+         (period, installation_id, category_id, transactions, units_sold,
+          revenue, cogs, gross_margin, inventory_units, source, updated_by)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'manual',$10)
        ON CONFLICT (period, installation_id, category_id) DO UPDATE
-       SET revenue = EXCLUDED.revenue, gross_margin = EXCLUDED.gross_margin,
-           units = EXCLUDED.units, source = 'manual',
-           updated_by = EXCLUDED.updated_by, updated_at = NOW()
+       SET transactions = EXCLUDED.transactions, units_sold = EXCLUDED.units_sold,
+           revenue = EXCLUDED.revenue, cogs = EXCLUDED.cogs,
+           gross_margin = EXCLUDED.gross_margin, inventory_units = EXCLUDED.inventory_units,
+           source = 'manual', updated_by = EXCLUDED.updated_by, updated_at = NOW()
        RETURNING id`,
-      [period, inst.rows[0].id, cat.rows[0].id, Number(revenue) || 0,
-       Number(gross_margin) || 0, Number(units) || 0, req.session.user.id]
+      [period, inst.rows[0].id, cat.rows[0].id,
+       Number(transactions) || 0, Number(units_sold) || 0,
+       rev, cost, Number((rev - cost).toFixed(2)),
+       inventory_units === '' || inventory_units == null ? null : Number(inventory_units),
+       req.session.user.id]
     );
     await audit(req.session.user.id, 'sales_fact', rows[0].id, 'upsert', null, req.body);
     res.status(201).json({ ok: true, id: rows[0].id });
@@ -245,22 +262,40 @@ router.patch('/sales/:id', async (req, res, next) => {
   if (!canWrite(req)) return denyReadOnly(res);
   try {
     const id = Number(req.params.id);
-    const before = await q('SELECT revenue::float8, gross_margin::float8, units FROM sales_fact WHERE id = $1', [id]);
+    const before = await q(
+      `SELECT transactions, units_sold, revenue::float8, cogs::float8,
+              gross_margin::float8, inventory_units
+       FROM sales_fact WHERE id = $1`, [id]);
     if (!before.rows[0]) return res.status(404).json({ error: 'Row not found' });
 
     const sets = [];
     const vals = [];
     let i = 1;
-    for (const f of ['revenue', 'gross_margin', 'units']) {
-      if (req.body[f] != null) { sets.push(`${f} = $${i++}`); vals.push(Number(req.body[f]) || 0); }
+    for (const f of ['transactions', 'units_sold', 'revenue', 'cogs', 'inventory_units']) {
+      if (req.body[f] == null) continue;
+      if (f === 'inventory_units' && req.body[f] === '') {
+        sets.push(`inventory_units = NULL`);
+        continue;
+      }
+      sets.push(`${f} = $${i++}`);
+      vals.push(Number(req.body[f]) || 0);
     }
     if (!sets.length) return res.status(400).json({ error: 'Nothing to update' });
+
+    // Gross margin is always revenue minus COGS. Recompute it here rather than
+    // letting an edit leave the two inconsistent.
+    const newRev = req.body.revenue != null ? Number(req.body.revenue) || 0 : before.rows[0].revenue;
+    const newCogs = req.body.cogs != null ? Number(req.body.cogs) || 0 : before.rows[0].cogs;
+    sets.push(`gross_margin = $${i++}`);
+    vals.push(Number((newRev - newCogs).toFixed(2)));
+
     sets.push(`source = 'manual'`, `updated_by = $${i++}`, `updated_at = NOW()`);
     vals.push(req.session.user.id, id);
 
     const { rows } = await q(
       `UPDATE sales_fact SET ${sets.join(', ')} WHERE id = $${i}
-       RETURNING id, revenue::float8, gross_margin::float8, units`, vals);
+       RETURNING id, transactions, units_sold, revenue::float8, cogs::float8,
+                 gross_margin::float8, inventory_units`, vals);
     await audit(req.session.user.id, 'sales_fact', id, 'update', before.rows[0], rows[0]);
     res.json({ ok: true, row: rows[0] });
   } catch (e) { next(e); }
@@ -282,10 +317,11 @@ router.delete('/sales/:id', async (req, res, next) => {
 router.get('/sales/export', async (req, res, next) => {
   try {
     const rows = await loadSales(filtersFrom(req.query));
-    const header = 'period,installation,business_line,category,revenue,gross_margin,units';
+    const header = 'period,installation,business_line,category,transactions,units_sold,revenue,cogs,gross_margin,inventory_units';
     const body = rows.map((r) =>
       [r.period, csvCell(r.installation), csvCell(r.business_line), csvCell(r.category),
-       r.revenue, r.gross_margin, r.units].join(',')).join('\n');
+       r.transactions, r.units_sold, r.revenue, r.cogs, r.gross_margin,
+       r.inventory_units == null ? '' : r.inventory_units].join(',')).join('\n');
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', 'attachment; filename="mccs_sales_export.csv"');
     res.send(`${header}\n${body}`);
@@ -308,6 +344,7 @@ router.post('/sales/import', upload.single('file'), async (req, res, next) => {
 
     const headers = splitCsvLine(lines[0]).map((h) => h.trim().toLowerCase());
     const need = ['period', 'installation', 'business_line', 'category', 'revenue'];
+    // transactions, units_sold, cogs and inventory_units are optional.
     const missing = need.filter((h) => !headers.includes(h));
     if (missing.length) {
       return res.status(400).json({ error: `CSV is missing required column(s): ${missing.join(', ')}` });
@@ -337,17 +374,32 @@ router.post('/sales/import', upload.single('file'), async (req, res, next) => {
       if (!catId) { errors.push(`Line ${n + 1}: unknown category "${bl} / ${cat}"`); continue; }
 
       const normalized = period.length === 7 ? `${period}-01` : period;
+      const cell = (name) => (idxOf(name) >= 0 ? cells[idxOf(name)] : undefined);
+      const numOr0 = (name) => Number(cell(name)) || 0;
+
+      const rev = numOr0('revenue');
+      // Prefer an explicit COGS column. If only gross_margin is supplied,
+      // back COGS out of it so the two never disagree.
+      const cogs = idxOf('cogs') >= 0
+        ? numOr0('cogs')
+        : (idxOf('gross_margin') >= 0 ? rev - numOr0('gross_margin') : 0);
+      const invRaw = cell('inventory_units');
+      const inventory = invRaw === undefined || String(invRaw).trim() === ''
+        ? null : Number(invRaw) || 0;
+
       await q(
-        `INSERT INTO sales_fact (period, installation_id, category_id, revenue, gross_margin, units, source, updated_by)
-         VALUES ($1,$2,$3,$4,$5,$6,'import',$7)
+        `INSERT INTO sales_fact
+           (period, installation_id, category_id, transactions, units_sold,
+            revenue, cogs, gross_margin, inventory_units, source, updated_by)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,'import',$10)
          ON CONFLICT (period, installation_id, category_id) DO UPDATE
-         SET revenue = EXCLUDED.revenue, gross_margin = EXCLUDED.gross_margin,
-             units = EXCLUDED.units, source = 'import',
-             updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
+         SET transactions = EXCLUDED.transactions, units_sold = EXCLUDED.units_sold,
+             revenue = EXCLUDED.revenue, cogs = EXCLUDED.cogs,
+             gross_margin = EXCLUDED.gross_margin, inventory_units = EXCLUDED.inventory_units,
+             source = 'import', updated_by = EXCLUDED.updated_by, updated_at = NOW()`,
         [normalized, instId, catId,
-         Number(cells[idxOf('revenue')]) || 0,
-         idxOf('gross_margin') >= 0 ? Number(cells[idxOf('gross_margin')]) || 0 : 0,
-         idxOf('units') >= 0 ? Number(cells[idxOf('units')]) || 0 : 0,
+         numOr0('transactions'), numOr0('units_sold'),
+         rev, cogs, Number((rev - cogs).toFixed(2)), inventory,
          req.session.user.id]
       );
       ok++;

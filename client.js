@@ -178,6 +178,7 @@ function renderKpis() {
     { v: money(h.latestRevenue), s: pct(h.momPct), l: `REVENUE ${mlabel(d.coverage.latestPeriod).toUpperCase()}` },
     { v: pct(h.yoyPct), s: '', l: 'YEAR OVER YEAR' },
     { v: `${h.latestMarginRatePct}%`, s: '', l: 'GROSS MARGIN RATE' },
+    { v: `$${h.avgTransactionValue}`, s: `${num(h.latestTransactions)} txns`, l: 'AVG TRANSACTION VALUE' },
     { v: money(d.forecast.total), s: `${d.forecast.mapePct}% err`, l: 'NEXT 3 MONTHS' },
     { v: `${d.campaigns.profitable}/${d.campaigns.total}`, s: '', l: 'CAMPAIGNS RETURNING COST' },
     { v: money(d.opportunities.totalAddressable), s: '', l: 'ADDRESSABLE OPPORTUNITY' }
@@ -494,18 +495,19 @@ function renderPrograms() {
 
   $('progTbl').innerHTML = `
     <thead><tr>
-      <th class="plain">Program</th><th class="plain">Revenue</th><th class="plain">Margin</th>
-      <th class="plain">Margin rate</th><th class="plain">Trend</th><th class="plain">Promo spend</th>
-      <th class="plain">Promo ROI</th><th class="plain">Recommendation</th>
+      <th class="plain">Program</th><th class="plain">Revenue</th><th class="plain">Margin rate</th>
+      <th class="plain">Trend</th><th class="plain">Avg transaction</th><th class="plain">Inv. turns</th>
+      <th class="plain">Days of supply</th><th class="plain">Promo ROI</th><th class="plain">Recommendation</th>
     </tr></thead>
     <tbody>${p.map((x) => `
       <tr>
-        <td class="name">${esc(x.businessLine)}<span><br>${num(x.units)} units</span></td>
+        <td class="name">${esc(x.businessLine)}<span><br>${num(x.transactions)} transactions</span></td>
         <td>${money(x.revenue)}</td>
-        <td>${money(x.margin)}</td>
         <td>${x.marginRatePct}%</td>
         <td class="${x.trendPct >= 0 ? 'win' : 'lose'}">${pct(x.trendPct)}</td>
-        <td>${money(x.promoSpend)}</td>
+        <td>$${x.avgTransactionValue}</td>
+        <td>${x.inventoryTurns == null ? '<span class="chip neutral">no stock</span>' : x.inventoryTurns + 'x'}</td>
+        <td>${x.daysOfSupply == null ? '-' : x.daysOfSupply + ' days'}</td>
         <td>${x.promoRoiPct == null ? '-' : pct(x.promoRoiPct)}</td>
         <td><span class="chip ${chipFor(x.recommendation)}">${esc(x.recommendation)}</span></td>
       </tr>`).join('')}</tbody>`;
@@ -681,7 +683,9 @@ async function loadData() {
     <thead><tr>
       ${th('period', 'Period')}${th('installation', 'Installation')}
       ${th('business_line', 'Business line')}${th('category', 'Category')}
-      ${th('revenue', 'Revenue')}${th('gross_margin', 'Gross margin')}${th('units', 'Units')}
+      ${th('transactions', 'Txns')}${th('units_sold', 'Units')}
+      ${th('revenue', 'Revenue')}${th('cogs', 'COGS')}
+      <th class="plain">Gross margin</th>${th('inventory_units', 'Inventory')}
       <th class="plain">Source</th>${editable ? '<th class="plain"></th>' : ''}
     </tr></thead>
     <tbody>${rows.map((x) => `
@@ -690,16 +694,23 @@ async function loadData() {
         <td class="name">${esc(x.installation)}</td>
         <td>${esc(x.business_line)}</td>
         <td>${esc(x.category)}</td>
+        <td>${editable ? `<input type="number" data-f="transactions" value="${x.transactions}">` : num(x.transactions)}</td>
+        <td>${editable ? `<input type="number" data-f="units_sold" value="${x.units_sold}">` : num(x.units_sold)}</td>
         <td>${editable ? `<input type="number" step="0.01" data-f="revenue" value="${x.revenue}">` : money(x.revenue)}</td>
-        <td>${editable ? `<input type="number" step="0.01" data-f="gross_margin" value="${x.gross_margin}">` : money(x.gross_margin)}</td>
-        <td>${editable ? `<input type="number" data-f="units" value="${x.units}">` : num(x.units)}</td>
+        <td>${editable ? `<input type="number" step="0.01" data-f="cogs" value="${x.cogs}">` : money(x.cogs)}</td>
+        <td title="Always revenue minus COGS">${money(x.gross_margin)}</td>
+        <td>${x.inventory_units == null
+              ? '<span class="chip neutral" title="This business line does not carry stock">n/a</span>'
+              : (editable ? `<input type="number" data-f="inventory_units" value="${x.inventory_units}">` : num(x.inventory_units))}</td>
         <td><span class="chip neutral">${esc(x.source)}</span></td>
         ${editable ? '<td><button class="btn ghost sm" data-del="1">Delete</button></td>' : ''}
       </tr>`).join('')}</tbody>`;
 
   $('pgInfo').textContent = `Page ${r.page} of ${r.totalPages || 1} \u00b7 ${num(r.total)} records`;
   $('dataTotals').textContent =
-    `Filtered totals: revenue ${money(r.totals.revenue)}, gross margin ${money(r.totals.margin)}, units ${num(r.totals.units)}`;
+    `Filtered totals: revenue ${money(r.totals.revenue)}, COGS ${money(r.totals.cogs)}, ` +
+    `gross margin ${money(r.totals.margin)}, ${num(r.totals.transactions)} transactions, ${num(r.totals.unitsSold)} units. ` +
+    `Gross margin is computed as revenue minus COGS and cannot be edited directly.`;
   $('pgPrev').disabled = r.page <= 1;
   $('pgNext').disabled = r.page >= r.totalPages;
 
@@ -1045,9 +1056,11 @@ function wire() {
           installation: $('aInst').value,
           business_line: bl,
           category: cat,
+          transactions: $('aTxn').value,
+          units_sold: $('aUnits').value,
           revenue: $('aRev').value,
-          gross_margin: $('aGm').value,
-          units: $('aUnits').value
+          cogs: $('aCogs').value,
+          inventory_units: $('aInv').value
         })
       });
       $('addCard').hidden = true;

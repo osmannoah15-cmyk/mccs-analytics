@@ -54,9 +54,12 @@ async function initSchema() {
       period          DATE NOT NULL,
       installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
       category_id     INTEGER NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+      transactions    INTEGER NOT NULL DEFAULT 0,
+      units_sold      INTEGER NOT NULL DEFAULT 0,
       revenue         NUMERIC(14,2) NOT NULL DEFAULT 0,
+      cogs            NUMERIC(14,2) NOT NULL DEFAULT 0,
       gross_margin    NUMERIC(14,2) NOT NULL DEFAULT 0,
-      units           INTEGER NOT NULL DEFAULT 0,
+      inventory_units INTEGER,
       source          TEXT NOT NULL DEFAULT 'seed',
       updated_by      INTEGER REFERENCES users(id),
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -75,10 +78,12 @@ async function initSchema() {
       installation      TEXT NOT NULL,
       business_line     TEXT NOT NULL,
       start_date        DATE,
+      end_date          DATE,
       spend             NUMERIC(14,2) NOT NULL DEFAULT 0,
       markdown_pct      NUMERIC(6,2) NOT NULL DEFAULT 0,
       baseline_revenue  NUMERIC(14,2) NOT NULL DEFAULT 0,
       promo_revenue     NUMERIC(14,2) NOT NULL DEFAULT 0,
+      margin_rate_pct   NUMERIC(6,2) NOT NULL DEFAULT 0,
       incremental_margin NUMERIC(14,2) NOT NULL DEFAULT 0,
       status            TEXT NOT NULL DEFAULT 'active',
       updated_by        INTEGER REFERENCES users(id),
@@ -121,6 +126,50 @@ async function initSchema() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
   `);
+
+  await migrate();
+}
+
+/**
+ * Brings a database created by an earlier version up to the current shape.
+ *
+ * CREATE TABLE IF NOT EXISTS does nothing to a table that already exists, so a
+ * deployment made before these columns were added would silently keep the old
+ * layout and every insert would fail. Each statement below is idempotent and
+ * safe to run on every boot.
+ */
+async function migrate() {
+  const statements = [
+    `ALTER TABLE sales_fact ADD COLUMN IF NOT EXISTS transactions INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE sales_fact ADD COLUMN IF NOT EXISTS units_sold INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE sales_fact ADD COLUMN IF NOT EXISTS cogs NUMERIC(14,2) NOT NULL DEFAULT 0`,
+    `ALTER TABLE sales_fact ADD COLUMN IF NOT EXISTS inventory_units INTEGER`,
+    `ALTER TABLE campaigns  ADD COLUMN IF NOT EXISTS end_date DATE`,
+    `ALTER TABLE campaigns  ADD COLUMN IF NOT EXISTS margin_rate_pct NUMERIC(6,2) NOT NULL DEFAULT 0`
+  ];
+  for (const sql of statements) {
+    try {
+      await q(sql);
+    } catch (e) {
+      console.warn('migration step skipped:', e.message);
+    }
+  }
+
+  // The original schema called this column "units" while it actually held
+  // transaction counts. If that column is still present, move its values into
+  // transactions and drop it so the two are never confused again.
+  try {
+    const { rows } = await q(`
+      SELECT 1 FROM information_schema.columns
+      WHERE table_name = 'sales_fact' AND column_name = 'units'`);
+    if (rows.length) {
+      await q(`UPDATE sales_fact SET transactions = units WHERE transactions = 0`);
+      await q(`ALTER TABLE sales_fact DROP COLUMN units`);
+      console.log('Migrated legacy "units" column into "transactions".');
+    }
+  } catch (e) {
+    console.warn('legacy units migration skipped:', e.message);
+  }
 }
 
 async function audit(userId, entity, entityId, action, before, after) {

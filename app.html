@@ -255,13 +255,15 @@
         <select id="aPeriod"></select>
         <select id="aInst"></select>
         <select id="aCat"></select>
+        <input type="number" id="aTxn" placeholder="Transactions">
+        <input type="number" id="aUnits" placeholder="Units sold">
         <input type="number" id="aRev" placeholder="Revenue" step="0.01">
-        <input type="number" id="aGm" placeholder="Gross margin" step="0.01">
-        <input type="number" id="aUnits" placeholder="Units">
+        <input type="number" id="aCogs" placeholder="COGS" step="0.01">
+        <input type="number" id="aInv" placeholder="Inventory (blank if none)">
         <button class="btn sm" id="btnSaveRow">Save record</button>
         <button class="btn ghost sm" id="btnCancelRow">Cancel</button>
       </div>
-      <div class="hint">Adding a record for an existing period, installation, and category combination updates that record.</div>
+      <div class="hint">Gross margin is calculated as revenue minus COGS, so it is not entered here. Leave inventory blank for business lines that hold no stock. Saving over an existing period, installation, and category updates that record.</div>
     </div>
 
     <div class="card">

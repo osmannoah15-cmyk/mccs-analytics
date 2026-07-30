@@ -14,7 +14,8 @@ const sum = (arr) => arr.reduce((a, b) => a + (Number(b) || 0), 0);
 /** ---------- Shaping ---------- */
 
 /**
- * @param {Array} rows  [{period:'2026-06-01', installation, business_line, category, revenue, gross_margin, units}]
+ * @param {Array} rows  [{period:'2026-06-01', installation, business_line, category,
+ *                        transactions, units_sold, revenue, cogs, gross_margin, inventory_units}]
  */
 function monthsOf(rows) {
   return [...new Set(rows.map((r) => r.period))].sort();
@@ -105,7 +106,9 @@ function campaignMetrics(c) {
     installation: c.installation,
     businessLine: c.business_line,
     startDate: c.start_date,
+    endDate: c.end_date,
     status: c.status,
+    marginRatePct: round(Number(c.margin_rate_pct) || 0, 1),
     spend: round(spend),
     markdownPct: round(Number(c.markdown_pct) || 0, 1),
     baselineRevenue: round(baseline),
@@ -156,7 +159,19 @@ function programPortfolio(rows, campaigns, months) {
     const lineRows = rows.filter((r) => r.business_line === bl);
     const revenue = sum(lineRows.map((r) => r.revenue));
     const margin = sum(lineRows.map((r) => r.gross_margin));
-    const units = sum(lineRows.map((r) => r.units));
+    const unitsSold = sum(lineRows.map((r) => r.units_sold));
+    const transactions = sum(lineRows.map((r) => r.transactions));
+    const cogs = sum(lineRows.map((r) => r.cogs));
+    // Inventory is only carried by lines that hold physical stock.
+    // Average the TOTAL stock held in each period, not the average of
+    // individual rows, or the scale will not match period COGS.
+    const invByPeriod = new Map();
+    for (const r of lineRows) {
+      if (r.inventory_units == null) continue;
+      invByPeriod.set(r.period, (invByPeriod.get(r.period) || 0) + r.inventory_units);
+    }
+    const avgInventory = invByPeriod.size
+      ? sum([...invByPeriod.values()]) / invByPeriod.size : null;
     const recent = sum(lineRows.filter((r) => recentMonths.has(r.period)).map((r) => r.revenue));
     const prior = sum(lineRows.filter((r) => priorMonths.has(r.period)).map((r) => r.revenue));
     const trendPct = prior ? ((recent - prior) / prior) * 100 : 0;
@@ -178,8 +193,30 @@ function programPortfolio(rows, campaigns, months) {
       revenue: round(revenue),
       margin: round(margin),
       marginRatePct: round(marginRate, 1),
-      units,
-      revenuePerUnit: units ? round(revenue / units, 2) : 0,
+      unitsSold,
+      transactions,
+      cogs: round(cogs),
+      avgTransactionValue: transactions ? round(revenue / transactions, 2) : 0,
+      revenuePerUnit: unitsSold ? round(revenue / unitsSold, 2) : 0,
+      unitsPerTransaction: transactions ? round(unitsSold / transactions, 2) : 0,
+      avgInventoryUnits: avgInventory == null ? null : round(avgInventory, 0),
+      // Annualized turns: COGS over the period against average stock value,
+      // approximated with the line's own cost per unit.
+      inventoryTurns: (() => {
+        if (avgInventory == null || !unitsSold || !cogs) return null;
+        const monthsCovered = months.length || 1;
+        const costPerUnit = cogs / unitsSold;
+        const avgStockValue = avgInventory * costPerUnit;   // dollars held, on average
+        if (!avgStockValue) return null;
+        const annualCogs = cogs * (12 / monthsCovered);
+        return round(annualCogs / avgStockValue, 2);
+      })(),
+      daysOfSupply: (() => {
+        if (avgInventory == null || !unitsSold) return null;
+        const monthsCovered = months.length || 1;
+        const unitsPerDay = unitsSold / (monthsCovered * 30.44);
+        return unitsPerDay ? round(avgInventory / unitsPerDay, 1) : null;
+      })(),
       trendPct: round(trendPct, 1),
       promoSpend: round(promoSpend),
       promoRoiPct: promoRoi == null ? null : round(promoRoi, 1),
@@ -405,7 +442,7 @@ function scorecard(rows, months, campaigns, installs, programs) {
     {
       id: 'obj2',
       title: 'MCCS will be relevant to Marines and families',
-      note: 'Patron demand as revealed by revenue, units, and promotion response',
+      note: 'Patron demand as revealed by revenue, transactions, and promotion response',
       kpis: [
         kpi('Revenue, latest month', revLatest, 'usd', revPrev),
         kpi('Month over month change', revPrev ? ((revLatest - revPrev) / revPrev) * 100 : 0, 'pct', 0),
@@ -548,6 +585,10 @@ function buildDigest(rows, campaignRows, filters = {}) {
   const revPrev = at(prev);
   const revYear = at(yearAgo);
 
+  const lastRows = rows.filter((r) => r.period === last);
+  const txnLast = sum(lastRows.map((r) => r.transactions));
+  const unitsLast = sum(lastRows.map((r) => r.units_sold));
+
   const sorted = [...campaigns].sort((a, b) => a.roiPct - b.roiPct);
 
   return {
@@ -565,9 +606,14 @@ function buildDigest(rows, campaignRows, filters = {}) {
       latestRevenue: revLast,
       momPct: revPrev ? round(((revLast - revPrev) / revPrev) * 100, 1) : null,
       yoyPct: revYear ? round(((revLast - revYear) / revYear) * 100, 1) : null,
-      latestMarginRatePct: revLast ? round((sum(rows.filter((r) => r.period === last).map((r) => r.gross_margin)) / revLast) * 100, 1) : null,
+      latestMarginRatePct: revLast ? round((sum(lastRows.map((r) => r.gross_margin)) / revLast) * 100, 1) : null,
+      latestTransactions: txnLast,
+      latestUnitsSold: unitsLast,
+      avgTransactionValue: txnLast ? round(revLast / txnLast, 2) : null,
+      unitsPerTransaction: txnLast ? round(unitsLast / txnLast, 2) : null,
       totalRevenue: round(sum(revSeries)),
-      totalMargin: round(sum(marSeries))
+      totalMargin: round(sum(marSeries)),
+      totalCogs: round(sum(rows.map((r) => r.cogs)))
     },
     forecast: {
       periods: f.points.map((p, i) => ({ period: addMonths(last, i + 1), ...p })),
