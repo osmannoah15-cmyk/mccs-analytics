@@ -29,13 +29,12 @@
 
 <nav>
   <div class="seg" id="tabs">
-    <button data-v="scorecard" class="on">Scorecard</button>
-    <button data-v="sales">Sales &amp; forecast</button>
+    <button data-v="sales" class="on">Sales &amp; forecast</button>
     <button data-v="promo">Promotion ROI</button>
     <button data-v="lob">Lines of business</button>
     <button data-v="scenario">Scenario</button>
     <button data-v="ai">AI analyst</button>
-    <button data-v="admin" id="tabAdmin" hidden>Manage</button>
+    <button data-v="admin" id="tabAdmin" hidden>Admin</button>
   </div>
 </nav>
 
@@ -57,45 +56,14 @@
   <div class="kpis" id="kpis" style="margin-bottom:18px"></div>
 
   <!-- ============ SCORECARD ============ -->
-  <section class="view on" id="v-scorecard">
+  <!-- ============ SALES & FORECAST ============ -->
+  <section class="view on" id="v-sales">
     <div class="card">
-      <h2>Measured against its own history
-        <span class="sub" id="scoreCompared"></span></h2>
-      <p class="lede">Each measure below is compared with what MCCS itself achieved before, either the same month a year ago or the trailing twelve month average. Nothing is scored against an invented target, so every result can be traced back to the data.</p>
-      <div class="scorehead">
-        <div class="scorestat">
-          <div class="big" id="healthPct">-</div>
-          <div class="meta">of measures ahead of<br>their own baseline</div>
-        </div>
-        <div class="scorestat">
-          <div class="big" id="instrumented">-</div>
-          <div class="meta">of the three objectives<br>can be measured today</div>
-        </div>
-        <div style="flex:1;min-width:220px">
-          <div id="healthMeta" class="meta" style="margin-bottom:8px"></div>
-          <div class="bar"><i id="healthBar" style="width:0%"></i></div>
-        </div>
-      </div>
-    </div>
-
-    <div class="obj-grid" id="objGrid"></div>
-
-    <div class="card">
-      <h2>Quantified opportunity
+      <h2>Where the money is
         <span class="sub">What the analysis is worth, with the basis for each figure</span></h2>
       <div class="opps" id="oppCards"></div>
     </div>
 
-    <div class="card">
-      <h2>Scorecard narrative
-        <span class="sub"><span class="engine" id="engScore"><span class="dot"></span><span id="engScoreTxt">engine: checking</span></span></span></h2>
-      <button class="btn" id="btnScorecardAI">Generate narrative</button>
-      <div class="out" id="scorecardOut" style="margin-top:12px"><span class="placeholder">Generates a written assessment of each objective, naming which measures are ahead of their baseline, which are behind, and what would have to change.</span></div>
-    </div>
-  </section>
-
-  <!-- ============ SALES & FORECAST ============ -->
-  <section class="view" id="v-sales">
     <div class="controls">
       <div class="seg mini" id="metricSeg">
         <button data-m="revenue" class="on">Revenue</button>
@@ -130,22 +98,20 @@
 
   <!-- ============ PROMOTION ROI ============ -->
   <section class="view" id="v-promo">
-    <div class="card" style="padding:14px 20px">
-      <div class="filterset">
-        <div class="frow"><span class="flabel">Channel</span><div class="fchips" id="chChips"></div></div>
-        <div class="frow"><span class="flabel">Line of business</span><div class="fchips" id="blChips"></div></div>
-        <div class="frow"><span class="flabel">Installation</span><div class="fchips" id="instChips"></div></div>
-        <div class="frow"><span class="flabel">Result</span><div class="fchips" id="resChips">
-          <button data-res="all" class="on">All</button>
-          <button data-res="win">Returned its cost</button>
-          <button data-res="lose">Did not</button>
-        </div></div>
+    <div class="filterbar">
+      <select id="fChannel"><option value="all">All channels</option></select>
+      <select id="fLob"><option value="all">All lines of business</option></select>
+      <select id="fBase"><option value="all">All installations</option></select>
+      <div class="seg mini" id="resSeg">
+        <button data-res="all" class="on">All</button>
+        <button data-res="win">Earning</button>
+        <button data-res="lose">Losing</button>
       </div>
-      <div class="activebar">
-        <span class="hint" id="promoCount"></span>
-        <button class="btn ghost sm" id="btnClearPromo" hidden>Clear all filters</button>
-      </div>
+      <div class="spacer"></div>
+      <span class="hint" id="promoCount"></span>
+      <button class="btn ghost sm" id="btnClearPromo" hidden>Clear</button>
     </div>
+
     <div class="grid even">
       <div class="card">
         <h2>Spend against return <span class="sub">Click a campaign to inspect it. Bubble size is incremental margin.</span></h2>
@@ -158,7 +124,7 @@
     </div>
     <div class="card">
       <h2>Campaign league table <span class="sub">Click a row for an AI assessment of whether to continue, rework, or stop it</span></h2>
-      <div class="tablewrap"><table id="campTbl"></table></div>
+      <div class="tablewrap scroll" id="campScroll"><table id="campTbl"></table></div>
       <div class="out" id="campOut" style="margin-top:14px" hidden></div>
     </div>
   </section>
@@ -207,55 +173,58 @@
 
   <!-- ============ SCENARIO ============ -->
   <section class="view" id="v-scenario">
-    <div class="card">
-      <h2>What if <span class="sub">Set the levers, and see how the next three months change</span></h2>
-      <p class="lede">Demand and promotion spend both move revenue, so both feed the same projection below. The margin rate lever changes what is kept from that revenue. Every effect is listed separately so you can see where the number came from.</p>
-    </div>
-
     <div class="grid">
       <div class="card">
-        <h2>Levers</h2>
+        <h2>What if</h2>
         <div class="sliders">
           <div class="slider">
             <div class="top"><span class="lbl">Patron demand</span><span class="val" id="vDemand">no change</span></div>
             <input type="range" id="sDemand" min="-30" max="30" value="0" step="1">
-            <div class="hint">More or fewer patrons buying, at the same prices. Moves revenue directly.</div>
           </div>
           <div class="slider">
             <div class="top"><span class="lbl">Promotion budget</span><span class="val" id="vPromo">no change</span></div>
             <input type="range" id="sPromo" min="-50" max="50" value="0" step="5">
-            <div class="hint">Also moves revenue, at the return per dollar these campaigns actually achieved. The cost of the extra spend is subtracted from margin.</div>
           </div>
           <div class="slider">
             <div class="top"><span class="lbl">Gross margin rate</span><span class="val" id="vMargin">no change</span></div>
             <input type="range" id="sMargin" min="-10" max="10" value="0" step="0.5">
-            <div class="hint">Pricing or cost of goods. Changes what is kept from revenue, not revenue itself.</div>
           </div>
           <label class="toggle">
             <input type="checkbox" id="sRealloc">
-            <span>Move spend out of campaigns that do not return their cost</span>
+            <span>Move spend out of losing campaigns</span>
           </label>
-          <div class="hint" style="margin-top:-8px">Total spend stays the same. Only its destination changes.</div>
         </div>
-        <div style="display:flex;gap:8px;margin-top:20px;flex-wrap:wrap">
-          <button class="btn" id="btnRunScenario">Run scenario</button>
-          <button class="btn ghost" id="btnResetScenario">Reset levers</button>
-          <button class="btn ghost" id="btnSaveScenario">Save</button>
+        <div style="display:flex;gap:8px;margin-top:22px;flex-wrap:wrap">
+          <button class="btn ghost sm" id="btnResetScenario">Reset</button>
+          <button class="btn ghost sm" id="btnSaveScenario">Save</button>
+          <button class="btn ghost sm" id="btnExplainScenario">Explain</button>
         </div>
+        <details class="explain" style="margin-top:16px">
+          <summary>How each lever works</summary>
+          <dl>
+            <dt>Patron demand</dt>
+            <dd>More or fewer patrons buying at the same prices. Moves revenue, and margin follows at the current rate.</dd>
+            <dt>Promotion budget</dt>
+            <dd>Also moves revenue, at the return per dollar these campaigns actually achieved. The cost of the extra spend is subtracted, so more spend only helps if the return beats it.</dd>
+            <dt>Gross margin rate</dt>
+            <dd>Pricing or cost of goods. Changes what is kept from revenue, not revenue itself.</dd>
+            <dt>Move spend out of losing campaigns</dt>
+            <dd>Total spend is unchanged. Money in campaigns that do not return their cost is redirected to the best performing channel.</dd>
+          </dl>
+        </details>
       </div>
 
       <div class="card">
-        <h2>Result <span class="sub" id="scenHorizon">Next three months</span></h2>
-        <div id="scenHeadline"><div class="empty">Move a lever, then run the scenario.</div></div>
+        <h2>Result <span class="sub">Next three months against no change</span></h2>
+        <div id="scenHeadline"></div>
         <div id="waterfall"></div>
-        <div id="scenAssume" class="hint"></div>
+        <div id="scenAssume"></div>
       </div>
     </div>
 
-    <div class="card">
-      <h2>Read the result <span class="sub">Written from the figures above</span></h2>
-      <button class="btn" id="btnExplainScenario">Explain this scenario</button>
-      <div class="out" id="scenOut" style="margin-top:12px"><span class="placeholder">Explains the margin impact, names the biggest driver, and states one caution about what the model does not account for.</span></div>
+    <div class="card" id="scenExplainCard" hidden>
+      <h2>Reading the result</h2>
+      <div class="out" id="scenOut"></div>
     </div>
 
     <div class="card">
@@ -396,7 +365,6 @@
   </section>
 </main>
 
-<div id="tip" role="tooltip"></div>
 <div class="foot">
   <span>MCCS Revenue Intelligence &middot; synthetic dataset &middot; Dexian Government Solutions</span>
   <span>Forecast: seasonal index times linear trend &middot; AI narrates computed metrics only</span>

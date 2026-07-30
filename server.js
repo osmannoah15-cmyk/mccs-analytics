@@ -132,7 +132,7 @@ async function start() {
     console.error('');
     console.error('  DATA LOAD FAILED:', e.message);
     console.error('  The app will start, but the dashboard will be empty.');
-    console.error('  Sign in as an administrator and use Manage > Load data,');
+    console.error('  Sign in as an administrator and use Admin > Load data,');
     console.error('  or confirm dataset.json is committed at the repo root.');
     console.error('');
   }

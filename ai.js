@@ -205,45 +205,6 @@ Scenario: ${JSON.stringify(result, null, 1)}`;
   } catch (e) { next(e); }
 });
 
-/** ---------- Scorecard narrative (the LOE 4 anchor) ---------- */
-router.post('/scorecard', async (req, res, next) => {
-  try {
-    const d = await digestFor(req.body.filters);
-    if (!d) return res.status(400).json({ error: 'No data for those filters' });
-
-    const prompt = `Write a short narrative for this enterprise scorecard. One paragraph per objective.
-
-For an objective marked instrumented false, say plainly that it cannot be measured from the data available and name what would be needed. Do not invent a proxy measure for it.
-
-For the others, name which measures are ahead of their baseline and which are behind, always stating what the baseline is (the same month last year, the trailing twelve month average, or break-even), and say what would have to change to move a measure that is behind.
-
-Close with one sentence on how much of the enterprise can actually be measured today.
-
-Scorecard: ${JSON.stringify(d.scorecard, null, 1)}
-Supporting lines of business: ${JSON.stringify(d.linesOfBusiness, null, 1)}`;
-
-    const out = await runAi({
-      req, kind: 'scorecard', prompt,
-      fallback: () => {
-        const sc = d.scorecard;
-        const parts = sc.objectives.map((o) => {
-          if (!o.instrumented) {
-            return `${o.title}: not measurable from the data in this system. ${o.gap} Closing it would require ${o.needed[0].toLowerCase()}.`;
-          }
-          const off = o.kpis.filter((k) => !k.onTrack);
-          const on = o.kpis.filter((k) => k.onTrack);
-          let t = `${o.title}: ${on.length} of ${o.kpis.length} measures ahead of their own baseline.`;
-          if (on.length) t += ` Ahead: ${on.map((k) => `${k.label} (${pct(k.deltaPct)} vs ${k.baselineLabel})`).join(', ')}.`;
-          if (off.length) t += ` Behind: ${off.map((k) => `${k.label} (${pct(k.deltaPct)} vs ${k.baselineLabel})`).join(', ')}.`;
-          return t;
-        });
-        return `${parts.join('\n\n')}\n\nAcross the measures that can be computed today, ${sc.summary.onTrack} of ${sc.summary.kpiCount} are ahead of their own baseline. ${sc.summary.objectivesInstrumented} of the ${sc.summary.objectivesTotal} enterprise objectives can be measured from the data in this system.`;
-      }
-    });
-    res.json({ ...out, scorecard: d.scorecard });
-  } catch (e) { next(e); }
-});
-
 /** ---------- Status and audit ---------- */
 router.get('/status', async (_req, res) => {
   const configured = sage.isConfigured();
@@ -328,7 +289,7 @@ function fallbackAnswer(question, d) {
     const w = d.campaigns.worst[0], b = d.campaigns.best[0];
     return `${d.campaigns.profitable} of ${d.campaigns.total} campaigns return their cost, on ${money(d.campaigns.totalSpend)} of total spend. Weakest is ${w.name} at ${pct(w.roiPct)} on ${money(w.spend)}. Strongest is ${b.name} at ${pct(b.roiPct)}.`;
   }
-  return `Latest month revenue was ${money(d.headline.latestRevenue)} (${pct(d.headline.momPct)} month over month, ${pct(d.headline.yoyPct)} year over year), with ${d.campaigns.profitable} of ${d.campaigns.total} campaigns returning their cost and ${money(d.opportunities.totalAddressable)} of addressable opportunity identified. Ask about installations, channels, campaigns, lines of business, anomalies, the forecast, or the scorecard for specifics.`;
+  return `Latest month revenue was ${money(d.headline.latestRevenue)} (${pct(d.headline.momPct)} month over month, ${pct(d.headline.yoyPct)} year over year), with ${d.campaigns.profitable} of ${d.campaigns.total} campaigns returning their cost and ${money(d.opportunities.totalAddressable)} of addressable opportunity identified. Ask about installations, channels, campaigns, lines of business, anomalies, the forecast, or the enterprise objectives for specifics.`;
 }
 
 module.exports = router;

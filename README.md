@@ -8,17 +8,15 @@ Prototype using synthetic data. Not for operational use.
 
 ## What it does
 
-**Scorecard.** Measures rolling up to the three enterprise objectives. Every measure is compared against a baseline taken from the data itself, either the same month a year ago or the trailing twelve month average, so no target is invented and every result can be traced back. Objective 1, leadership endorsement, is shown as not measurable from this data, with what would be needed to close the gap. This is the anchor view.
-
-**Sales and forecast.** Monthly revenue and gross margin, a three month projection with an 80 percent interval and a stated error rate, an installation heat table indexed to each installation's own average, and month over month movers.
+**Sales and forecast.** Opens with quantified opportunity cards putting a dollar figure and a stated basis on each finding. Monthly revenue and gross margin, a three month projection with an 80 percent interval and a stated error rate, an installation heat table indexed to each installation's own average, and month over month movers.
 
 **Promotion ROI.** Filter by channel, line of business, installation, and whether a campaign returned its cost. Click a channel bar to filter to it, or click a campaign in the scatter or the table to select it and get an AI assessment of whether to continue, rework, or stop it. The channel chart recomputes from whatever is currently visible.
 
 **Lines of business.** Margin rate, trend, average transaction, stock cover and turns, and promotion efficiency per line, plus a sustain, scale, or review recommendation with every input visible. An expandable panel explains each measure in plain language. Includes seasonally adjusted anomaly detection.
 
-**Scenario.** Levers for patron demand, promotion budget, and margin rate. Demand and promotion both feed the same revenue projection, since both move revenue, and the result is presented as a waterfall showing each lever's separate effect on revenue and on margin. Moving a lever recalculates immediately.
+**Scenario.** Levers for patron demand, promotion budget, and margin rate. Demand and promotion both feed the same revenue projection, since both move revenue. The result leads with a single number, the change in margin, then lists what each lever contributed. Moving a lever recalculates immediately, and the assumptions behind every figure sit in an expandable panel rather than on the surface.
 
-**Manage.** Data status and loading, the full sales dataset (filterable, sortable, editable in place, with CSV import and export), change history, user accounts, and the AI call log. Analysts see the data tools, administrators see everything.
+**Admin.** Data status and loading, the full sales dataset (filterable, sortable, editable in place, with CSV import and export), change history, user accounts, and the AI call log. Analysts see the data tools, administrators see everything.
 
 **AI analyst.** Executive briefing and grounded question answering. Every AI response is built from metrics computed server side, and every call is logged.
 
@@ -59,7 +57,9 @@ render.yaml
 
 Every file sits at the repo root. There are no subfolders, so `require` paths are all `./name`. The browser script is named `client.js` rather than `app.js` to keep it clearly separate from the server modules sitting beside it.
 
-**Roles.** Viewer reads the analytics tabs. Analyst additionally sees the Manage tab and can edit data. Admin sees everything in Manage, including data loading, accounts, and the AI call log.
+**Roles.** Viewer reads the analytics tabs. Analyst additionally sees the Admin tab and can edit data. Admin sees everything there, including data loading, accounts, and the AI call log.
+
+Enterprise objective measures are still computed and remain answerable through the AI analyst, they simply no longer have a dedicated tab.
 
 ---
 
@@ -83,9 +83,9 @@ Seed complete: 1152 sales rows (2025-01 to 2026-06), 48 campaigns, total revenue
 
 ### If the dashboard is empty
 
-Sign in as an administrator and open **Manage**. The Data status panel shows what is in the database on the left and what the seed file offers on the right, which separates the two possible failures immediately:
+Sign in as an administrator and open **Admin**. The Data status panel shows what is in the database on the left and what the seed file offers on the right, which separates the two possible failures immediately:
 
-- **dataset.json missing.** The file is not on the server. It is the only `.json` among a set of `.js` files, so it is the one most often missed when copying files by hand. Commit it at the repo root and redeploy, or import a CSV from the Manage tab.
+- **dataset.json missing.** The file is not on the server. It is the only `.json` among a set of `.js` files, so it is the one most often missed when copying files by hand. Commit it at the repo root and redeploy, or import a CSV from the Admin tab.
 - **File present, database empty.** Click **Load data**. No redeploy needed.
 
 The deploy log tells the same story if you would rather read it there. `DATA LOAD FAILED` names the cause.
@@ -94,9 +94,9 @@ The deploy log tells the same story if you would rather read it there. `DATA LOA
 
 **1. Automatic.** Commit `dataset.json`, deploy, done.
 
-**2. Manage tab.** **Load data** fills an empty database. **Replace all data** wipes sales, campaigns, installations and categories first, then reloads. Neither touches user accounts. Use this when you want to reset between practice runs without redeploying.
+**2. Admin tab.** **Load data** fills an empty database. **Replace all data** wipes sales, campaigns, installations and categories first, then reloads. Neither touches user accounts. Use this when you want to reset between practice runs without redeploying.
 
-**3. CSV import.** Manage tab, for adding or amending records without touching the repo. Export first to get a correctly shaped file.
+**3. CSV import.** Admin tab, for adding or amending records without touching the repo. Export first to get a correctly shaped file.
 
 `RESET_DATA=true` still forces a reload on boot, but remove it once it has run. Left in place it wipes the database on every restart, including a restart in the middle of a demo.
 
@@ -206,14 +206,13 @@ Ask Sage configured: true
 Open your Render URL. You should land on the sign in page. Use `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 
 First checks:
-- The header under the title reads something like `1,152 records, 8 installations, 4 business lines`. If it says "No data loaded yet", go to Manage and load it.
-- The Scorecard shows populated objectives, with each measure naming what it is compared against.
+- The header under the title reads something like `1,152 records, 8 installations, 4 business lines`. If it says "No data loaded yet", go to Admin and load it.
 - The Sales tab renders the chart with a dashed forecast tail.
 - On the AI analyst tab, the engine badge reads **engine: Ask Sage** with a green dot. If it is orange and reads **built-in metrics**, see troubleshooting.
 
 ### 7. Add the accounts you need for the meeting
 
-Manage tab, add each person with the **viewer** role. Viewers can explore everything but cannot alter the data, which is what you want for a live audience.
+Admin tab, add each person with the **viewer** role. Viewers can explore everything but cannot alter the data, which is what you want for a live audience.
 
 ### 8. Before you present
 
@@ -249,7 +248,7 @@ npm run seed:reset
 
 ## Troubleshooting
 
-**The dashboard is empty.** Open Manage and read the Data status panel. It distinguishes a missing seed file from a database that simply has not been loaded, and the **Load data** button fixes the second case without a redeploy.
+**The dashboard is empty.** Open Admin and read the Data status panel. It distinguishes a missing seed file from a database that simply has not been loaded, and the **Load data** button fixes the second case without a redeploy.
 
 **Engine badge says built-in metrics.** Open `/api/ai/status` in the browser while signed in. It returns the reason. Usually the API key or email is wrong, or the model name is not one your account can use. Try `gpt-4.1-mini`.
 

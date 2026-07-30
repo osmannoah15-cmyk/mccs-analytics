@@ -10,7 +10,7 @@ const S = {
   campaigns: [],
   channels: [],
   metric: 'revenue',
-  promoFilter: { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' },
+  promoFilter: { channel: 'all', bl: 'all', inst: 'all', result: 'all' },
   selectedCampaign: null,
   charts: {},
   data: { page: 1, pageSize: 50, sort: 'period', dir: 'asc', search: '' },
@@ -98,17 +98,6 @@ function typeInto(node, text) {
   })();
 }
 
-/* ---------------- Tooltip ---------------- */
-const tip = $('tip');
-function showTip(html, x, y) {
-  tip.innerHTML = html;
-  tip.style.display = 'block';
-  const r = tip.getBoundingClientRect();
-  tip.style.left = `${Math.min(x + 14, window.innerWidth - r.width - 12)}px`;
-  tip.style.top = `${Math.max(10, y - r.height - 12)}px`;
-}
-const hideTip = () => { tip.style.display = 'none'; };
-
 /* ---------------- Boot ---------------- */
 
 async function boot() {
@@ -179,7 +168,7 @@ async function refresh() {
   if (!$('fFrom').options.length || $('fFrom').options.length === 1) fillPeriodPickers(data.months);
 
   renderKpis();
-  renderScorecard();
+  renderOpportunities();
   renderSales();
   await loadCampaigns();
   renderLob();
@@ -208,59 +197,8 @@ function renderKpis() {
 
 /* ---------------- Scorecard ---------------- */
 
-function renderScorecard() {
+function renderOpportunities() {
   const d = S.analytics.digest;
-  const sc = d.scorecard;
-  const sum = sc.summary;
-
-  $('scoreCompared').textContent = `Latest month compared with ${sc.comparedWith}`;
-  $('healthPct').textContent = `${sum.onTrack} of ${sum.kpiCount}`;
-  $('instrumented').textContent = `${sum.objectivesInstrumented} of ${sum.objectivesTotal}`;
-  $('healthBar').style.width = `${sum.healthPct}%`;
-  $('healthMeta').innerHTML = sum.offTrack
-    ? `${sum.offTrack} ${sum.offTrack === 1 ? 'measure is' : 'measures are'} behind. Each objective below shows what it is measured against.`
-    : 'Every measure is ahead of its own baseline.';
-
-  const fmtVal = (k) => {
-    if (k.unit === 'usd') return money(k.value);
-    if (k.unit === 'usd2') return `$${k.value.toFixed(2)}`;
-    if (k.unit === 'pct') return `${k.value.toFixed(1)}%`;
-    return num(Math.round(k.value));
-  };
-
-  $('objGrid').innerHTML = sc.objectives.map((o, i) => {
-    if (!o.instrumented) {
-      return `
-        <div class="obj gap">
-          <div class="eyebrow">Objective ${i + 1}</div>
-          <h3>${esc(o.title)}</h3>
-          <div class="badge-gap">Not measurable yet</div>
-          <div class="gapnote">${esc(o.gap)}</div>
-          <div class="gapnote" style="margin-bottom:6px"><b>What would close the gap</b></div>
-          <ul class="needed">${o.needed.map((n) => `<li>${esc(n)}</li>`).join('')}</ul>
-        </div>`;
-    }
-    return `
-      <div class="obj">
-        <div class="eyebrow">Objective ${i + 1}</div>
-        <h3>${esc(o.title)}</h3>
-        <div class="note">${esc(o.basis)}</div>
-        ${o.kpis.map((k) => `
-          <div class="kpiblock">
-            <div class="row1">
-              <span class="klabel">${esc(k.label)}</span>
-              <span class="kval">${fmtVal(k)}</span>
-            </div>
-            <div class="row2">
-              <span class="dot ${k.onTrack ? 'ok' : 'off'}"></span>
-              <span class="delta ${k.onTrack ? 'win' : 'lose'}">${k.deltaPct == null ? '' : pct(k.deltaPct)}</span>
-              <span>vs ${fmtVal({ ...k, value: k.baseline })} &middot; ${esc(k.baselineLabel)}</span>
-            </div>
-            ${k.note ? `<div class="knote">${esc(k.note)}</div>` : ''}
-          </div>`).join('')}
-      </div>`;
-  }).join('');
-
   $('oppCards').innerHTML = d.opportunities.items.map((o) => `
     <div class="opp">
       <div class="v">${money(o.value)}</div>
@@ -378,49 +316,40 @@ async function loadCampaigns() {
   const data = await api(`/api/campaigns?${qs()}`);
   S.campaigns = data.campaigns;
   S.channels = data.channels;
-  renderPromoFilters();
+  fillPromoFilters();
   renderPromo();
 }
 
-function chipRow(boxId, values, active, onToggle) {
-  const box = $(boxId);
-  box.innerHTML = `<button data-v="__all" class="${active.size ? '' : 'on'}">All</button>` +
-    values.map((v) => `<button data-v="${esc(v)}" class="${active.has(v) ? 'on' : ''}">${esc(v)}</button>`).join('');
-  box.querySelectorAll('button').forEach((b) => {
-    b.onclick = () => {
-      const v = b.dataset.v;
-      if (v === '__all') active.clear();
-      else if (active.has(v)) active.delete(v);
-      else active.add(v);
-      onToggle();
-    };
+function fillPromoFilters() {
+  const all = S.campaigns;
+  const fill = (id, values, placeholder) => {
+    const sel = $(id);
+    const keep = sel.value;
+    sel.innerHTML = `<option value="all">${placeholder}</option>`;
+    values.forEach((v) => sel.appendChild(new Option(v, v)));
+    if (keep && [...sel.options].some((o) => o.value === keep)) sel.value = keep;
+  };
+  fill('fChannel', [...new Set(all.map((c) => c.channel))].sort(), 'All channels');
+  fill('fLob', [...new Set(all.map((c) => c.businessLine))].sort(), 'All lines of business');
+  fill('fBase', [...new Set(all.map((c) => c.installation))].sort(), 'All installations');
+
+  $('resSeg').querySelectorAll('button').forEach((b) => {
+    b.classList.toggle('on', b.dataset.res === S.promoFilter.result);
   });
+  $('btnClearPromo').hidden = !promoFiltered();
 }
 
-function renderPromoFilters() {
+function promoFiltered() {
   const f = S.promoFilter;
-  const all = S.campaigns;
-  const redraw = () => { S.selectedCampaign = null; renderPromoFilters(); renderPromo(); };
-
-  chipRow('chChips', [...new Set(all.map((c) => c.channel))].sort(), f.channel, redraw);
-  chipRow('blChips', [...new Set(all.map((c) => c.businessLine))].sort(), f.bl, redraw);
-  chipRow('instChips', [...new Set(all.map((c) => c.installation))].sort(), f.inst, redraw);
-
-  $('resChips').querySelectorAll('button').forEach((b) => {
-    b.classList.toggle('on', b.dataset.res === f.result);
-    b.onclick = () => { f.result = b.dataset.res; redraw(); };
-  });
-
-  const anyActive = f.channel.size || f.bl.size || f.inst.size || f.result !== 'all';
-  $('btnClearPromo').hidden = !anyActive;
+  return f.channel !== 'all' || f.bl !== 'all' || f.inst !== 'all' || f.result !== 'all';
 }
 
 function visibleCampaigns() {
   const f = S.promoFilter;
   return S.campaigns.filter((c) =>
-    (!f.channel.size || f.channel.has(c.channel)) &&
-    (!f.bl.size || f.bl.has(c.businessLine)) &&
-    (!f.inst.size || f.inst.has(c.installation)) &&
+    (f.channel === 'all' || c.channel === f.channel) &&
+    (f.bl === 'all' || c.businessLine === f.bl) &&
+    (f.inst === 'all' || c.installation === f.inst) &&
     (f.result === 'all' || (f.result === 'win' ? c.profitable : !c.profitable)));
 }
 
@@ -504,7 +433,7 @@ function renderPromo() {
       labels: chans.map((c) => c.channel),
       datasets: [{
         data: chans.map((c) => Number(c.roiPct.toFixed(1))),
-        backgroundColor: chans.map((c) => S.promoFilter.channel.has(c.channel)
+        backgroundColor: chans.map((c) => S.promoFilter.channel === c.channel
           ? 'rgba(242,98,7,.8)'
           : (c.roiPct >= 0 ? 'rgba(22,163,74,.65)' : 'rgba(220,38,38,.6)')),
         borderRadius: 5
@@ -515,10 +444,9 @@ function renderPromo() {
       onClick: (evt, els) => {
         if (!els.length) return;
         const ch = chans[els[0].index].channel;
-        const set = S.promoFilter.channel;
-        if (set.has(ch)) set.delete(ch); else set.add(ch);
+        S.promoFilter.channel = S.promoFilter.channel === ch ? 'all' : ch;
         S.selectedCampaign = null;
-        renderPromoFilters();
+        fillPromoFilters();
         renderPromo();
       },
       plugins: {
@@ -569,6 +497,19 @@ function renderCampaignTable(cs) {
       if (S.selectedCampaign) explainCampaign(id);
     };
   });
+
+  // Bring the selected campaign into view. Clicking a bubble in the scatter
+  // is otherwise easy to miss when the row sits far down a long table.
+  if (S.selectedCampaign != null) {
+    const row = $('campTbl').querySelector(`tr[data-id="${S.selectedCampaign}"]`);
+    const box = $('campScroll');
+    if (row && box) {
+      const target = row.offsetTop - box.clientHeight / 2 + row.clientHeight / 2;
+      box.scrollTo({ top: Math.max(0, target), behavior: 'smooth' });
+      row.classList.add('flash');
+      setTimeout(() => row.classList.remove('flash'), 1200);
+    }
+  }
 }
 
 async function explainCampaign(id) {
@@ -700,8 +641,6 @@ function scenarioParams() {
 }
 
 async function runScenario() {
-  const btn = $('btnRunScenario');
-  btn.disabled = true;
   try {
     const r = await api('/api/scenario', {
       method: 'POST',
@@ -713,58 +652,57 @@ async function runScenario() {
     $('scenHeadline').innerHTML = `<div class="empty">${esc(e.message)}</div>`;
     $('waterfall').innerHTML = '';
   }
-  btn.disabled = false;
 }
 
 function renderScenario(r) {
-  const up = (n) => (n >= 0 ? 'win' : 'lose');
+  const d = r.delta.margin;
+  const cls = d > 0 ? 'win' : d < 0 ? 'lose' : '';
+  const sign = d > 0 ? '+' : '';
 
   $('scenHeadline').innerHTML = `
-    <div class="scenhead">
-      <div class="item">
-        <div class="l">Projected revenue</div>
-        <div class="v">${money(r.projected.revenue)}</div>
-        <div class="c ${up(r.delta.revenue)}">${r.delta.revenue >= 0 ? '+' : ''}${money(r.delta.revenue)} vs no change (${pct(r.delta.revenuePct)})</div>
-      </div>
-      <div class="item">
-        <div class="l">Projected margin</div>
-        <div class="v">${money(r.projected.margin)}</div>
-        <div class="c ${up(r.delta.margin)}">${r.delta.margin >= 0 ? '+' : ''}${money(r.delta.margin)} vs no change</div>
-      </div>
-      <div class="item">
-        <div class="l">Margin rate</div>
-        <div class="v">${r.projected.marginRatePct}%</div>
-        <div class="c">from ${r.baseline.marginRatePct}%</div>
+    <div class="resulthead">
+      <div class="cap">Change in margin</div>
+      <div class="big ${cls}">${sign}${money(d)}</div>
+      <div class="sub2">
+        Margin goes from ${money(r.baseline.margin)} to ${money(r.projected.margin)}.<br>
+        Revenue goes from ${money(r.baseline.revenue)} to ${money(r.projected.revenue)}${
+          r.delta.revenue ? ` (${pct(r.delta.revenuePct)})` : ''}.
       </div>
     </div>`;
 
-  const row = (cls, label, basis, rev, mar) => `
-    <div class="wfrow ${cls}">
-      <div>
-        <div class="wflabel">${esc(label)}</div>
-        ${basis ? `<div class="wfbasis">${esc(basis)}</div>` : ''}
-      </div>
-      <div class="wfval ${rev === 0 ? '' : up(rev)}">${rev === 0 ? '\u2014' : (rev > 0 ? '+' : '') + money(rev)}</div>
-      <div class="wfval ${mar === 0 ? '' : up(mar)}">${mar === 0 ? '\u2014' : (mar > 0 ? '+' : '') + money(mar)}</div>
+  if (!r.steps.length) {
+    $('waterfall').innerHTML = '<div class="empty">Move a lever to see its effect.</div>';
+    $('scenAssume').innerHTML = '';
+    return;
+  }
+
+  const row = (label, val) => `
+    <div class="erow">
+      <span class="elabel">${esc(label)}</span>
+      <span class="eval ${val > 0 ? 'win' : val < 0 ? 'lose' : ''}">${val > 0 ? '+' : ''}${money(val)}</span>
     </div>`;
 
   $('waterfall').innerHTML = `
-    <div class="wf">
-      <div class="wfhead"><span>Effect</span><span>Revenue</span><span>Margin</span></div>
-      ${row('base', r.baseline.label, `Seasonal trend projection over ${r.horizonMonths} months`,
-        r.baseline.revenue, r.baseline.margin)}
-      ${r.steps.length
-        ? r.steps.map((st) => row('', st.label, st.basis, st.revenue, st.margin)).join('')
-        : '<div class="wfrow"><div class="wfbasis">No levers set. Move a slider to see its effect.</div><div></div><div></div></div>'}
-      ${row('total', `Projected total`, '', r.projected.revenue, r.projected.margin)}
+    <div class="effects">
+      <div class="ehead"><span>Where it comes from</span><span>Margin</span></div>
+      ${r.steps.map((st) => row(st.label, st.margin)).join('')}
+      <div class="etotal">
+        <span>Total change</span>
+        <span class="eval ${cls}">${sign}${money(d)}</span>
+      </div>
     </div>`;
 
-  $('scenAssume').innerHTML = '<b>Assumptions:</b> ' + r.assumptions.map(esc).join(' ');
+  $('scenAssume').innerHTML = `
+    <details class="explain">
+      <summary>Assumptions behind these figures</summary>
+      <dl>${r.steps.map((st) => `<dt>${esc(st.label)}</dt><dd>${esc(st.basis)}</dd>`).join('')}
+      <dt>Held constant</dt><dd>${r.assumptions.map(esc).join(' ')}</dd></dl>
+    </details>`;
 }
 
 async function explainScenario() {
   const out = $('scenOut');
-  out.hidden = false;
+  $('scenExplainCard').hidden = false;
   skeleton(out, 3);
   try {
     const r = await api('/api/ai/scenario', {
@@ -938,7 +876,6 @@ async function checkAiStatus() {
     const engine = s.reachable ? 'asksage' : 'builtin';
     const note = s.error || (s.configured ? '' : 'Ask Sage credentials are not set');
     setEngine('engBrief', 'engBriefTxt', engine, note);
-    setEngine('engScore', 'engScoreTxt', engine, note);
   } catch { /* non-critical */ }
 }
 
@@ -997,7 +934,6 @@ async function aiPanel(endpoint, outId, btnId) {
   skeleton(out, 5);
   try {
     const r = await api(endpoint, { method: 'POST', body: JSON.stringify({ filters: filters() }) });
-    if (outId === 'scorecardOut') setEngine('engScore', 'engScoreTxt', r.engine, r.note);
     typeInto(out, r.text);
   } catch (e) {
     out.textContent = `Request failed: ${e.message}`;
@@ -1189,7 +1125,7 @@ function wire() {
   $('btnReset').onclick = async () => {
     $('fInst').value = 'all'; $('fBL').value = 'all';
     $('fFrom').value = ''; $('fTo').value = '';
-    S.promoFilter = { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' };
+    S.promoFilter = { channel: 'all', bl: 'all', inst: 'all', result: 'all' };
     S.selectedCampaign = null;
     await refresh();
   };
@@ -1213,7 +1149,6 @@ function wire() {
   bind('sDemand', 'vDemand', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${x}%`));
   bind('sMargin', 'vMargin', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${Number(x).toFixed(1)} points`));
   bind('sPromo', 'vPromo', (v) => noneIfZero(v, (x) => `${x > 0 ? '+' : ''}${x}%`));
-  $('btnRunScenario').onclick = runScenario;
   $('btnExplainScenario').onclick = explainScenario;
   $('btnResetScenario').onclick = () => {
     $('sDemand').value = 0; $('sMargin').value = 0; $('sPromo').value = 0;
@@ -1296,7 +1231,6 @@ function wire() {
   $('btnAsk').onclick = () => ask($('askInput').value);
   $('askInput').onkeydown = (e) => { if (e.key === 'Enter') ask($('askInput').value); };
   $('chips').querySelectorAll('button').forEach((b) => { b.onclick = () => ask(b.textContent); });
-  $('btnScorecardAI').onclick = () => aiPanel('/api/ai/scorecard', 'scorecardOut', 'btnScorecardAI');
   $('btnAnomalies').onclick = () => aiPanel('/api/ai/anomalies', 'anomOut', 'btnAnomalies');
 
   // Admin
@@ -1318,9 +1252,9 @@ function wire() {
   };
 
   $('btnClearPromo').onclick = () => {
-    S.promoFilter = { channel: new Set(), bl: new Set(), inst: new Set(), result: 'all' };
+    S.promoFilter = { channel: 'all', bl: 'all', inst: 'all', result: 'all' };
     S.selectedCampaign = null;
-    renderPromoFilters();
+    fillPromoFilters();
     renderPromo();
   };
 
@@ -1337,7 +1271,6 @@ function wire() {
     window.location.href = '/login';
   };
 
-  document.addEventListener('scroll', hideTip, { passive: true });
 }
 
 boot().catch((e) => console.error('Boot failed:', e));
