@@ -128,12 +128,17 @@ async function boot() {
 
 function fillFilters() {
   const m = S.meta;
+  // Rebuild rather than append, since this runs again after a data load.
+  $('fInst').innerHTML = '<option value="all">All installations</option>';
+  $('fBL').innerHTML = '<option value="all">All business lines</option>';
   m.installations.forEach((i) => $('fInst').appendChild(new Option(i, i)));
   m.businessLines.forEach((b) => $('fBL').appendChild(new Option(b, b)));
 
-  $('coverageLine').textContent =
-    `${m.coverage.rows} records &middot; ${m.installations.length} installations &middot; ${m.businessLines.length} business lines`
-      .replace('&middot;', '\u00b7');
+  // textContent does not decode HTML entities, so use the character directly.
+  const rows = Number(m.coverage.rows) || 0;
+  $('coverageLine').textContent = rows
+    ? `${num(rows)} records \u00b7 ${m.installations.length} installations \u00b7 ${m.businessLines.length} business lines`
+    : 'No data loaded yet';
 
   // Period pickers are built once the analytics response tells us the month list.
 }
@@ -154,7 +159,13 @@ function fillPeriodPickers(months) {
 async function refresh() {
   const data = await api(`/api/analytics?${qs()}`);
   if (data.empty) {
-    $('kpis').innerHTML = '<div class="empty">No records match these filters. Widen the selection or reset.</div>';
+    const anyData = Number(S.meta?.coverage?.rows) || 0;
+    $('kpis').innerHTML = anyData
+      ? '<div class="empty">No records match these filters. Widen the selection or reset.</div>'
+      : `<div class="empty">The database has no sales data yet.${
+          S.user?.role === 'admin'
+            ? ' Open the <b>Admin</b> tab and choose <b>Load data</b>.'
+            : ' Ask an administrator to load it.'}</div>`;
     return;
   }
   S.analytics = data;
@@ -941,6 +952,73 @@ async function loadAiLog() {
   } catch { /* non-critical */ }
 }
 
+
+/* ---------------- Admin: data status and loading ---------------- */
+
+async function loadDataStatus() {
+  const dbBox = $('dbStatus'), fileBox = $('fileStatus');
+  try {
+    const s = await api('/api/data-status');
+    const db = s.database;
+
+    dbBox.innerHTML = db.salesRows
+      ? `
+        <div class="kpirow"><div class="kl">Sales records</div><div class="kv"><span class="dot ok"></span>${num(db.salesRows)}</div></div>
+        <div class="kpirow"><div class="kl">Period covered</div><div class="kv">${mlabel(db.firstPeriod + '-01')} to ${mlabel(db.lastPeriod + '-01')}</div></div>
+        <div class="kpirow"><div class="kl">Total revenue</div><div class="kv">${money(db.totalRevenue)}</div></div>
+        <div class="kpirow"><div class="kl">Installations / categories</div><div class="kv">${db.installations} / ${db.categories}</div></div>
+        <div class="kpirow"><div class="kl">Campaigns</div><div class="kv">${num(db.campaigns)}</div></div>`
+      : `<div class="kpirow"><div class="kl">Sales records</div><div class="kv"><span class="dot off"></span>none</div></div>
+         <div class="hint" style="margin-top:8px">The dashboard will stay empty until data is loaded.</div>`;
+
+    const f = s.dataset;
+    if (!f.present) {
+      fileBox.innerHTML = `
+        <div class="kpirow"><div class="kl">dataset.json</div><div class="kv"><span class="dot off"></span>missing</div></div>
+        <div class="hint" style="margin-top:8px">The file is not on the server. Commit <b>dataset.json</b> at the repo root and redeploy, or import a CSV from the Data tab.</div>`;
+    } else if (f.error) {
+      fileBox.innerHTML = `<div class="kpirow"><div class="kl">dataset.json</div><div class="kv"><span class="dot off"></span>unreadable</div></div>
+        <div class="hint" style="margin-top:8px">${esc(f.error)}</div>`;
+    } else {
+      fileBox.innerHTML = `
+        <div class="kpirow"><div class="kl">dataset.json</div><div class="kv"><span class="dot ok"></span>${f.sizeKb} KB</div></div>
+        <div class="kpirow"><div class="kl">Sales rows available</div><div class="kv">${num(f.salesRows)}</div></div>
+        <div class="kpirow"><div class="kl">Campaigns available</div><div class="kv">${num(f.campaigns)}</div></div>
+        ${f.source ? `<div class="kpirow"><div class="kl">Source</div><div class="kv">${esc(f.source)}</div></div>` : ''}`;
+    }
+  } catch (e) {
+    dbBox.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    fileBox.innerHTML = '';
+  }
+}
+
+function loadMsg(text, kind = 'info') {
+  const n = $('loadMsg');
+  n.className = `alert ${kind === 'err' ? 'err' : kind === 'ok' ? 'ok' : 'info'}`;
+  n.innerHTML = text;
+  n.hidden = false;
+}
+
+async function doLoadData(replace) {
+  const btns = [$('btnLoadData'), $('btnReloadData')];
+  btns.forEach((b) => { b.disabled = true; });
+  loadMsg(replace ? 'Replacing all data...' : 'Loading data...', 'info');
+  try {
+    const r = await api('/api/load-data', {
+      method: 'POST', body: JSON.stringify({ replace: !!replace })
+    });
+    loadMsg(`Loaded ${num(r.salesRows)} sales records covering ${r.firstPeriod} to ${r.lastPeriod}, ` +
+      `total revenue ${money(r.totalRevenue)}.`, 'ok');
+    S.meta = await api('/api/meta');
+    fillFilters();
+    await loadDataStatus();
+    await refresh();
+  } catch (e) {
+    loadMsg(`Load failed: ${esc(e.message)}`, 'err');
+  }
+  btns.forEach((b) => { b.disabled = false; });
+}
+
 /* ---------------- Charts ---------------- */
 
 function drawChart(id, config) {
@@ -962,7 +1040,7 @@ function wire() {
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === `v-${b.dataset.v}`));
       location.hash = b.dataset.v;
       if (b.dataset.v === 'data') { fillAddForm(); loadData(); loadAudit(); }
-      if (b.dataset.v === 'admin') { loadUsers(); loadAiLog(); }
+      if (b.dataset.v === 'admin') { loadUsers(); loadAiLog(); loadDataStatus(); }
       if (b.dataset.v === 'scenario') loadScenarios();
     };
   });
@@ -1096,6 +1174,14 @@ function wire() {
       loadUsers();
     } catch (e) { userMsg(e.message, 'err'); }
   };
+
+  $('btnLoadData').onclick = () => doLoadData(false);
+  $('btnReloadData').onclick = () => {
+    if (confirm('Replace all sales, campaign, installation and category data?\n\nAny edits made in the app will be discarded. User accounts are not affected.')) {
+      doLoadData(true);
+    }
+  };
+  $('btnRefreshStatus').onclick = loadDataStatus;
 
   $('btnLogout').onclick = async () => {
     await fetch('/auth/logout', { method: 'POST' });

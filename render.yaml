@@ -17,8 +17,6 @@ services:
         generateValue: true
       - key: NODE_ENV
         value: production
-      - key: AUTO_SEED
-        value: "true"
       - key: ASKSAGE_MODEL
         value: gpt-4.1-mini
       - key: ASKSAGE_USER_BASE

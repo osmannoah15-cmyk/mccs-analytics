@@ -69,30 +69,36 @@ The app ships with `dataset.json`, generated from `MCCS_Sales_Sample_Data.xlsx`:
 
 Per record it carries transactions, units sold, gross revenue, COGS, and inventory on hand. Gross margin is never stored as an independent input, it is always computed as revenue minus COGS, so the two can never drift apart. Inventory is present only for MCX Retail, since the other lines hold no stock, and the app shows those as "no stock" rather than zero.
 
-### Why the app can deploy with no data
+### How loading works
 
-`dataset.json` is the seed. If it is missing from the repo, the tables are created but stay empty, and the dashboard renders with nothing in it. This is the most common cause, and it is easy to miss when copying files by hand because it is the only `.json` among a set of `.js` files.
+An empty database loads `dataset.json` automatically on boot. No environment variable is required. If the load fails the app still starts and says why in the log, so you can sign in and fix it rather than staring at a crashed service.
 
-Check the Render deploy log. You are looking for:
+A successful load prints:
 
 ```
+No sales data found, loading dataset...
 Dataset: 1152 sales rows, 48 campaigns (from MCCS_Sales_Sample_Data.xlsx)
 Seed complete: 1152 sales rows (2025-01 to 2026-06), 48 campaigns, total revenue $220,712,879
 ```
 
-If instead you see `dataset.json was not found next to seed.js`, that is the problem. Commit the file and redeploy.
+### If the dashboard is empty
 
-If you see `Sales data already present (0 rows). Skipping seed.` you have a different issue, and if you see nothing about seeding at all, `AUTO_SEED` is not set to `true`.
+Sign in as an administrator and open **Admin**. The Data status panel shows what is in the database on the left and what the seed file offers on the right, which separates the two possible failures immediately:
+
+- **dataset.json missing.** The file is not on the server. It is the only `.json` among a set of `.js` files, so it is the one most often missed when copying files by hand. Commit it at the repo root and redeploy, or import a CSV from the Data tab.
+- **File present, database empty.** Click **Load data**. No redeploy needed.
+
+The deploy log tells the same story if you would rather read it there. `DATA LOAD FAILED` names the cause.
 
 ### Three ways to load data
 
-**1. Commit `dataset.json` and let the app seed itself.** This is the default and needs no local tooling. Confirm `AUTO_SEED=true` in the Render environment, push, and the app loads the data on boot. To replace data that is already loaded, set `RESET_DATA=true`, redeploy once, then remove that variable so a later restart does not wipe edits made during a demo.
+**1. Automatic.** Commit `dataset.json`, deploy, done.
 
-**2. Import a CSV through the app.** Sign in as an admin or analyst, open the Data tab, and use **Import CSV**. Good for adding a few months without a redeploy. Export first to get a correctly shaped file.
+**2. Admin tab.** **Load data** fills an empty database. **Replace all data** wipes sales, campaigns, installations and categories first, then reloads. Neither touches user accounts. Use this when you want to reset between practice runs without redeploying.
 
-**3. Load Postgres directly.** Only if you want to bypass the app. Copy the External Database URL from Render and run `psql "$EXTERNAL_URL" -f yourfile.sql`. The internal URL only resolves from inside Render.
+**3. CSV import.** Data tab, for adding or amending records without touching the repo. Export first to get a correctly shaped file.
 
-Option 1 is the right one for a deployment you control through GitHub.
+`RESET_DATA=true` still forces a reload on boot, but remove it once it has run. Left in place it wipes the database on every restart, including a restart in the middle of a demo.
 
 ### Refreshing from a new spreadsheet
 
@@ -172,7 +178,6 @@ In the web service, open **Environment** and add:
 | `ASKSAGE_API_KEY` | your Ask Sage API key |
 | `ASKSAGE_EMAIL` | the email on your Ask Sage account |
 | `ASKSAGE_MODEL` | `gpt-4.1-mini`, or another model your account has |
-| `AUTO_SEED` | `true` |
 | `NODE_ENV` | `production` |
 
 Leave `PORT` alone. Render sets it.
@@ -188,8 +193,8 @@ Click **Manual Deploy**, then **Deploy latest commit**. Watch the logs for:
 ```
 Schema ready.
 Bootstrapped admin account: you@example.com
-Sales rows: 1152
-Campaigns: 48
+No sales data found, loading dataset...
+Seed complete: 1152 sales rows (2025-01 to 2026-06), 48 campaigns, total revenue $220,712,879
 MCCS Revenue Intelligence listening on 10000
 Ask Sage configured: true
 ```
@@ -201,6 +206,7 @@ Ask Sage configured: true
 Open your Render URL. You should land on the sign in page. Use `ADMIN_EMAIL` and `ADMIN_PASSWORD`.
 
 First checks:
+- The header under the title reads something like `1,152 records, 8 installations, 4 business lines`. If it says "No data loaded yet", go to Admin and load it.
 - The Scorecard tab shows a health percentage and populated objectives.
 - The Sales tab renders the chart with a dashed forecast tail.
 - On the AI analyst tab, the engine badge reads **engine: Ask Sage** with a green dot. If it is orange and reads **built-in metrics**, see troubleshooting.
@@ -243,7 +249,7 @@ npm run seed:reset
 
 ## Troubleshooting
 
-**The dashboard is empty.** See "Why the app can deploy with no data" above. Almost always a missing `dataset.json` or `AUTO_SEED` not set to `true`.
+**The dashboard is empty.** Open Admin and read the Data status panel. It distinguishes a missing seed file from a database that simply has not been loaded, and the **Load data** button fixes the second case without a redeploy.
 
 **Engine badge says built-in metrics.** Open `/api/ai/status` in the browser while signed in. It returns the reason. Usually the API key or email is wrong, or the model name is not one your account can use. Try `gpt-4.1-mini`.
 

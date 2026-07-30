@@ -1,6 +1,8 @@
 'use strict';
 const express = require('express');
 const multer = require('multer');
+const fs = require('fs');
+const path = require('path');
 const { q, audit } = require('./db');
 const M = require('./metrics');
 const { requireApiAuth } = require('./auth');
@@ -505,6 +507,98 @@ router.get('/audit', async (req, res, next) => {
        ORDER BY a.created_at DESC LIMIT 100`);
     res.json({ entries: rows });
   } catch (e) { next(e); }
+});
+
+
+/** ---------- Data status and manual load (admin) ---------- */
+
+const requireAdminRole = (req, res, next) =>
+  req.session?.user?.role === 'admin'
+    ? next()
+    : res.status(403).json({ error: 'Administrator access required' });
+
+/**
+ * Tells an admin exactly what is and is not loaded, and whether the seed file
+ * is even present on disk. This is the first thing to check when the
+ * dashboard is empty.
+ */
+router.get('/data-status', requireAdminRole, async (_req, res, next) => {
+  try {
+    const [sales, insts, cats, camps] = await Promise.all([
+      q(`SELECT COUNT(*)::int AS n,
+                TO_CHAR(MIN(period),'YYYY-MM') AS first,
+                TO_CHAR(MAX(period),'YYYY-MM') AS last,
+                COALESCE(SUM(revenue),0)::float8 AS revenue FROM sales_fact`),
+      q('SELECT COUNT(*)::int AS n FROM installations'),
+      q('SELECT COUNT(*)::int AS n FROM categories'),
+      q('SELECT COUNT(*)::int AS n FROM campaigns')
+    ]);
+
+    const datasetPath = path.join(__dirname, 'dataset.json');
+    let dataset = { present: false };
+    if (fs.existsSync(datasetPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(datasetPath, 'utf8'));
+        dataset = {
+          present: true,
+          source: raw.source || null,
+          generated: raw.generated || null,
+          salesRows: Array.isArray(raw.sales) ? raw.sales.length : 0,
+          campaigns: Array.isArray(raw.promos) ? raw.promos.length : 0,
+          sizeKb: Math.round(fs.statSync(datasetPath).size / 1024)
+        };
+      } catch (e) {
+        dataset = { present: true, error: `dataset.json is not valid JSON: ${e.message}` };
+      }
+    }
+
+    res.json({
+      database: {
+        salesRows: sales.rows[0].n,
+        firstPeriod: sales.rows[0].first,
+        lastPeriod: sales.rows[0].last,
+        totalRevenue: M.round(sales.rows[0].revenue),
+        installations: insts.rows[0].n,
+        categories: cats.rows[0].n,
+        campaigns: camps.rows[0].n
+      },
+      dataset
+    });
+  } catch (e) { next(e); }
+});
+
+/**
+ * Loads dataset.json into the database on demand, so an admin can fix an
+ * empty dashboard from the browser without a redeploy.
+ */
+router.post('/load-data', requireAdminRole, async (req, res) => {
+  const replace = req.body && req.body.replace === true;
+  try {
+    if (replace) process.env.RESET_DATA = 'true';
+    const { seed } = require('./seed');
+    await seed();
+
+    const { rows } = await q(`
+      SELECT COUNT(*)::int AS n,
+             TO_CHAR(MIN(period),'YYYY-MM') AS first,
+             TO_CHAR(MAX(period),'YYYY-MM') AS last,
+             COALESCE(SUM(revenue),0)::float8 AS revenue FROM sales_fact`);
+    await audit(req.session.user.id, 'sales_fact', null, replace ? 'reload' : 'load',
+      null, { rows: rows[0].n });
+
+    res.json({
+      ok: true,
+      salesRows: rows[0].n,
+      firstPeriod: rows[0].first,
+      lastPeriod: rows[0].last,
+      totalRevenue: M.round(rows[0].revenue)
+    });
+  } catch (e) {
+    console.error('Manual data load failed:', e.message);
+    res.status(500).json({ error: e.message });
+  } finally {
+    if (replace) delete process.env.RESET_DATA;
+  }
 });
 
 module.exports = { router, loadSales, loadCampaigns, filtersFrom };

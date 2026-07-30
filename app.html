@@ -308,6 +308,31 @@
   <!-- ============ ADMIN ============ -->
   <section class="view" id="v-admin">
     <div class="card">
+      <h2>Data status <span class="sub">What is loaded, and what is available to load</span></h2>
+      <div class="grid even">
+        <div>
+          <div class="obj" style="border:0;padding:0;box-shadow:none">
+            <div class="eyebrow">In the database</div>
+            <div id="dbStatus"><div class="empty">Checking...</div></div>
+          </div>
+        </div>
+        <div>
+          <div class="obj" style="border:0;padding:0;box-shadow:none">
+            <div class="eyebrow">Seed file on the server</div>
+            <div id="fileStatus"><div class="empty">Checking...</div></div>
+          </div>
+        </div>
+      </div>
+      <div class="alert info" id="loadMsg" hidden></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:16px">
+        <button class="btn" id="btnLoadData">Load data</button>
+        <button class="btn ghost" id="btnReloadData">Replace all data</button>
+        <button class="btn ghost" id="btnRefreshStatus">Refresh status</button>
+      </div>
+      <div class="hint">Load data fills an empty database and leaves existing records alone. Replace all data wipes the sales, campaign, installation, and category tables first, which also discards any edits made in the app. User accounts are never touched by either.</div>
+    </div>
+
+    <div class="card">
       <h2>Users</h2>
       <div class="controls">
         <input type="email" id="nuEmail" placeholder="Email">

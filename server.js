@@ -105,20 +105,42 @@ async function start() {
     await initSchema();
     console.log('Schema ready.');
     await bootstrapAdmin();
-
-    if (process.env.AUTO_SEED === 'true') {
-      const { seed } = require('./seed');
-      await seed();
-    }
-
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`MCCS Revenue Intelligence listening on ${PORT}`);
-      console.log(`Ask Sage configured: ${require('./asksage').isConfigured()}`);
-    });
   } catch (e) {
     console.error('Startup failed:', e);
     process.exit(1);
   }
+
+  // Seeding is deliberately outside the fatal block. An empty dataset is a
+  // problem to report, not a reason to refuse to serve: the admin can still
+  // sign in and load data from the Admin tab.
+  try {
+    const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM sales_fact');
+    const isEmpty = rows[0].n === 0;
+
+    if (process.env.AUTO_SEED === 'false') {
+      console.log('AUTO_SEED=false, skipping the automatic load.');
+    } else if (isEmpty || process.env.RESET_DATA === 'true') {
+      // An empty database always seeds. Requiring an env var to be set
+      // correctly was too easy to get wrong and failed silently.
+      console.log(isEmpty ? 'No sales data found, loading dataset...' : 'RESET_DATA=true, reloading dataset...');
+      const { seed } = require('./seed');
+      await seed();
+    } else {
+      console.log(`Sales data present (${rows[0].n} rows).`);
+    }
+  } catch (e) {
+    console.error('');
+    console.error('  DATA LOAD FAILED:', e.message);
+    console.error('  The app will start, but the dashboard will be empty.');
+    console.error('  Sign in as an administrator and use Admin > Load data,');
+    console.error('  or confirm dataset.json is committed at the repo root.');
+    console.error('');
+  }
+
+  app.listen(PORT, '0.0.0.0', () => {
+    console.log(`MCCS Revenue Intelligence listening on ${PORT}`);
+    console.log(`Ask Sage configured: ${require('./asksage').isConfigured()}`);
+  });
 }
 
 process.on('SIGTERM', () => {
