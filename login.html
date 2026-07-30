@@ -3,42 +3,44 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Sign in - MCCS Revenue Intelligence</title>
+<title>Sign in &middot; Revenue Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="/app.css">
 </head>
 <body>
-<div class="classbar">PROTOTYPE &middot; SYNTHETIC DATA ONLY &middot; NOT FOR OPERATIONAL USE</div>
+<div class="auth">
 
-<div class="login-wrap">
-  <section class="login-side">
+  <section class="auth-brand">
     <div>
-      <div class="mark lg"><i></i><i></i><i></i></div>
-      <h2>Every figure on the next screen is computed, not recalled.</h2>
-      <p>Revenue Intelligence brings sales, margin, and promotion data from every installation into one measured view, then lets you ask it questions in plain English. The AI narrates the numbers. It never invents them.</p>
+      <span class="logo">
+        <span class="logo-mark" aria-hidden="true"><span></span><span></span><span></span></span>
+        <span class="logo-txt">
+          <b>Revenue Intelligence</b>
+          <i>Marine Corps Community Services</i>
+        </span>
+      </span>
 
-      <div class="login-facts">
-        <div class="login-fact">
-          <div class="n">Measure what matters</div>
-          <div class="d">Program scorecards rolling up to enterprise objectives</div>
-        </div>
-        <div class="login-fact">
-          <div class="n">One data layer</div>
-          <div class="d">Installations and business lines under a common model</div>
-        </div>
-        <div class="login-fact">
-          <div class="n">Evidence for investment calls</div>
-          <div class="d">Program ROI and promotion economics, quantified</div>
-        </div>
+      <h2>Every figure here is <em>computed</em>, never recalled.</h2>
+      <p>Sales, margin, stock and promotion performance from every installation, in one place. Ask it a question in plain English and it answers from the numbers in front of you, citing what it used.</p>
+
+      <div class="auth-figs">
+        <div class="auth-fig"><div class="v">8</div><div class="l">Installations</div></div>
+        <div class="auth-fig"><div class="v">4</div><div class="l">Lines of business</div></div>
+        <div class="auth-fig"><div class="v">18</div><div class="l">Months of record</div></div>
       </div>
     </div>
-    <div class="login-foot">DEXIAN GOVERNMENT SOLUTIONS &middot; AI INNOVATION TEAM</div>
+
+    <p class="auth-note">
+      Dexian Government Solutions &middot; AI Innovation Team<br>
+      Prototype on synthetic data. Not for operational use.
+    </p>
   </section>
 
-  <section class="login-main">
-    <div class="login-card">
-      <div class="mark" style="margin-bottom:18px"><i></i><i></i><i></i></div>
+  <section class="auth-form">
+    <div class="auth-card">
       <h1>Sign in</h1>
-      <p class="sub">MCCS Revenue Intelligence</p>
+      <p class="sub">Accounts are issued by an administrator.</p>
 
       <div class="alert err" id="err" hidden></div>
 
@@ -51,14 +53,15 @@
           <label for="password">Password</label>
           <input type="password" id="password" name="password" required autocomplete="current-password">
         </div>
-        <button class="btn full" type="submit" id="submitBtn">Sign in</button>
+        <button class="btn block" type="submit" id="submitBtn" style="padding:11px">Sign in</button>
       </form>
 
-      <p class="hint" style="margin-top:18px;line-height:1.6">
-        Accounts are issued by an administrator. Contact your program lead if you need access.
+      <p class="hint" style="margin-top:20px">
+        Need access? Contact your program lead.
       </p>
     </div>
   </section>
+
 </div>
 
 <script>
@@ -75,7 +78,7 @@ form.addEventListener('submit', async (e) => {
   e.preventDefault();
   err.hidden = true;
   btn.disabled = true;
-  btn.textContent = 'Signing in...';
+  btn.textContent = 'Signing in';
 
   try {
     const res = await fetch('/auth/login', {
@@ -87,12 +90,9 @@ form.addEventListener('submit', async (e) => {
       })
     });
     const data = await res.json().catch(() => ({}));
-    if (res.ok) {
-      window.location.href = '/';
-      return;
-    }
-    showError(data.error || 'Sign in failed. Check your email and password.');
-  } catch (e) {
+    if (res.ok) { window.location.href = '/'; return; }
+    showError(data.error || 'That email and password do not match an account.');
+  } catch {
     showError('Could not reach the server. Check your connection and try again.');
   }
   btn.disabled = false;

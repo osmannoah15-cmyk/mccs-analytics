@@ -4,63 +4,109 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>MCCS Revenue Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="/app.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
-<div class="classbar">PROTOTYPE &middot; SYNTHETIC DATA ONLY &middot; NOT FOR OPERATIONAL USE</div>
+<a class="skip" href="#content">Skip to content</a>
 
-<header>
-  <div class="brand">
-    <div class="mark"><i></i><i></i><i></i></div>
-    <div>
-      <h1>MCCS Revenue Intelligence</h1>
-      <p id="coverageLine">Loading data coverage...</p>
+<div class="app">
+  <aside class="rail">
+    <div class="rail-top">
+      <a class="logo" href="/">
+        <span class="logo-mark" aria-hidden="true">
+          <span></span><span></span><span></span>
+        </span>
+        <span class="logo-txt">
+          <b>Revenue Intelligence</b>
+          <i>Marine Corps Community Services</i>
+        </span>
+      </a>
     </div>
-  </div>
-  <div class="userbox">
-    <div class="who">
-      <b id="userName">-</b>
-      <span id="userRole">-</span>
+
+    <nav class="rail-nav" id="tabs" aria-label="Sections">
+      <p class="rail-label">Analyse</p>
+      <button data-v="sales" class="on">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 12.5 6 7l3 3 5.5-6.5"/><path d="M1.5 14.5h13"/></svg>
+        Sales &amp; forecast
+      </button>
+      <button data-v="promo">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6"/><path d="M8 5v3l2 2"/></svg>
+        Promotion ROI
+      </button>
+      <button data-v="lob">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="8" width="3" height="6"/><rect x="6.5" y="4" width="3" height="10"/><rect x="11" y="6" width="3" height="8"/></svg>
+        Lines of business
+      </button>
+
+      <p class="rail-label">Plan</p>
+      <button data-v="scenario">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 11.5 6 6l3 2.5L14 3"/><path d="M10.5 3H14v3.5"/></svg>
+        Scenario
+      </button>
+      <button data-v="ai">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5 9.6 6l4.4 1.6L9.6 9.2 8 13.6 6.4 9.2 2 7.6 6.4 6z"/></svg>
+        AI analyst
+      </button>
+
+      <p class="rail-label" id="railAdminLabel" hidden>Operate</p>
+      <button data-v="admin" id="tabAdmin" hidden>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="2.5" width="12" height="11"/><path d="M2 6h12M6 6v7.5"/></svg>
+        Admin
+      </button>
+    </nav>
+
+    <div class="rail-foot">
+      <div class="whoami">
+        <span class="avatar" id="userInitials">--</span>
+        <span class="who">
+          <b id="userName">-</b>
+          <i id="userRole">-</i>
+        </span>
+      </div>
+      <button class="btn quiet block" id="btnLogout">Sign out</button>
+      <p class="rail-note">Prototype &middot; synthetic data<br>Not for operational use</p>
     </div>
-    <button class="btn ghost sm" id="btnLogout">Sign out</button>
-  </div>
-</header>
+  </aside>
 
-<nav>
-  <div class="seg" id="tabs">
-    <button data-v="sales" class="on">Sales &amp; forecast</button>
-    <button data-v="promo">Promotion ROI</button>
-    <button data-v="lob">Lines of business</button>
-    <button data-v="scenario">Scenario</button>
-    <button data-v="ai">AI analyst</button>
-    <button data-v="admin" id="tabAdmin" hidden>Admin</button>
-  </div>
-</nav>
+  <div class="content" id="content">
+    <header class="topbar">
+      <div class="titleblock">
+        <h1 id="pageTitle">Sales &amp; forecast</h1>
+        <p id="coverageLine">Loading data coverage</p>
+      </div>
+      <div class="topfilters">
+        <label class="field-inline">
+          <span>Installation</span>
+          <select id="fInst"><option value="all">All installations</option></select>
+        </label>
+        <label class="field-inline">
+          <span>Business line</span>
+          <select id="fBL"><option value="all">All business lines</option></select>
+        </label>
+        <label class="field-inline">
+          <span>From</span>
+          <select id="fFrom"><option value="">Earliest</option></select>
+        </label>
+        <label class="field-inline">
+          <span>To</span>
+          <select id="fTo"><option value="">Latest</option></select>
+        </label>
+        <button class="btn quiet sm" id="btnReset">Reset</button>
+      </div>
+    </header>
 
-<main>
-  <!-- Global filters -->
-  <div class="controls">
-    <label for="fInst">Installation</label>
-    <select id="fInst"><option value="all">All installations</option></select>
-    <label for="fBL">Business line</label>
-    <select id="fBL"><option value="all">All business lines</option></select>
-    <label for="fFrom">From</label>
-    <select id="fFrom"><option value="">Earliest</option></select>
-    <label for="fTo">To</label>
-    <select id="fTo"><option value="">Latest</option></select>
-    <div class="spacer"></div>
-    <button class="btn ghost sm" id="btnReset">Reset filters</button>
-  </div>
+    <div class="statement" id="kpis"></div>
 
-  <div class="kpis" id="kpis" style="margin-bottom:18px"></div>
-
+    <main class="views">
   <!-- ============ SCORECARD ============ -->
   <!-- ============ SALES & FORECAST ============ -->
   <section class="view on" id="v-sales">
     <div class="card">
       <h2>Where the money is
-        <span class="sub">What the analysis is worth, with the basis for each figure</span></h2>
+        <span class="sub">Each figure carries the basis it was derived from</span></h2>
       <div class="opps" id="oppCards"></div>
     </div>
 
@@ -74,9 +120,9 @@
       <div class="card">
         <h2>Monthly performance <span class="sub">Actuals with a three month projection and 80% interval</span></h2>
         <div class="legend">
-          <span><i class="sw" style="background:var(--accent)"></i>Actual</span>
-          <span><i class="sw" style="background:var(--blue)"></i>Forecast</span>
-          <span><i class="sw" style="background:rgba(37,99,235,.18)"></i>Interval</span>
+          <span><i class="sw" style="background:var(--scarlet)"></i>Actual</span>
+          <span><i class="sw" style="background:var(--slate)"></i>Forecast</span>
+          <span><i class="sw" style="background:rgba(58,90,115,.22)"></i>Interval</span>
         </div>
         <div class="chartbox"><canvas id="chartMain"></canvas></div>
         <div class="hint" id="forecastNote"></div>
@@ -272,14 +318,14 @@
       <h2>Data status <span class="sub">What is loaded, and what is available to load</span></h2>
       <div class="grid even">
         <div>
-          <div class="obj" style="border:0;padding:0;box-shadow:none">
-            <div class="eyebrow">In the database</div>
+          <div>
+            <div class="minihead">In the database</div>
             <div id="dbStatus"><div class="empty">Checking...</div></div>
           </div>
         </div>
         <div>
-          <div class="obj" style="border:0;padding:0;box-shadow:none">
-            <div class="eyebrow">Seed file on the server</div>
+          <div>
+            <div class="minihead">Seed file on the server</div>
             <div id="fileStatus"><div class="empty">Checking...</div></div>
           </div>
         </div>
@@ -363,12 +409,10 @@
       <div class="tablewrap"><table id="aiLogTbl"></table></div>
     </div>
   </section>
-</main>
-
-<div class="foot">
-  <span>MCCS Revenue Intelligence &middot; synthetic dataset &middot; Dexian Government Solutions</span>
-  <span>Forecast: seasonal index times linear trend &middot; AI narrates computed metrics only</span>
+    </main>
+  </div>
 </div>
+
 
 <script src="/client.js"></script>
 </body>

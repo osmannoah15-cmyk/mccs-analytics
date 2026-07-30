@@ -106,8 +106,13 @@ async function boot() {
     S.user = me.user;
     $('userName').textContent = S.user.name;
     $('userRole').textContent = S.user.role;
+    $('userInitials').textContent = String(S.user.name || S.user.email)
+      .split(/[\s@._-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '--';
     // Analysts need the data tools, admins additionally get accounts and logs.
-    if (['admin', 'analyst'].includes(S.user.role)) $('tabAdmin').hidden = false;
+    if (['admin', 'analyst'].includes(S.user.role)) {
+      $('tabAdmin').hidden = false;
+      $('railAdminLabel').hidden = false;
+    }
     if (S.user.role !== 'admin') {
       ['dataStatusCard', 'usersCard', 'aiLogCard'].forEach((id) => {
         const n = $(id); if (n) n.hidden = true;
@@ -133,8 +138,8 @@ function fillFilters() {
   // textContent does not decode HTML entities, so use the character directly.
   const rows = Number(m.coverage.rows) || 0;
   $('coverageLine').textContent = rows
-    ? `${num(rows)} records \u00b7 ${m.installations.length} installations \u00b7 ${m.businessLines.length} business lines`
-    : 'No data loaded yet';
+    ? `${num(rows)} records \u00b7 ${m.installations.length} installations \u00b7 ${m.businessLines.length} lines of business`
+    : 'No data loaded';
 
   // Period pickers are built once the analytics response tells us the month list.
 }
@@ -156,12 +161,13 @@ async function refresh() {
   const data = await api(`/api/analytics?${qs()}`);
   if (data.empty) {
     const anyData = Number(S.meta?.coverage?.rows) || 0;
-    $('kpis').innerHTML = anyData
-      ? '<div class="empty">No records match these filters. Widen the selection or reset.</div>'
-      : `<div class="empty">The database has no sales data yet.${
-          S.user?.role === 'admin'
-            ? ' Open the <b>Admin</b> tab and choose <b>Load data</b>.'
-            : ' Ask an administrator to load it.'}</div>`;
+    $('kpis').innerHTML = `<div class="stat" style="border:0"><div class="stat-s">${
+      anyData
+        ? 'No records match these filters. Widen the selection or reset.'
+        : (S.user?.role === 'admin'
+            ? 'No sales data loaded. Open Admin and choose Load data.'
+            : 'No sales data loaded. Ask an administrator to load it.')
+    }</div></div>`;
     return;
   }
   S.analytics = data;
@@ -180,22 +186,26 @@ async function refresh() {
 function renderKpis() {
   const d = S.analytics.digest;
   const h = d.headline;
-  const box = $('kpis');
-  const items = [
-    { v: money(h.latestRevenue), s: pct(h.momPct), l: `REVENUE ${mlabel(d.coverage.latestPeriod).toUpperCase()}` },
-    { v: pct(h.yoyPct), s: '', l: 'YEAR OVER YEAR' },
-    { v: `${h.latestMarginRatePct}%`, s: '', l: 'GROSS MARGIN RATE' },
-    { v: `$${h.avgTransactionValue}`, s: `${num(h.latestTransactions)} txns`, l: 'AVG TRANSACTION VALUE' },
-    { v: money(d.forecast.total), s: `${d.forecast.mapePct}% err`, l: 'NEXT 3 MONTHS' },
-    { v: `${d.campaigns.profitable}/${d.campaigns.total}`, s: '', l: 'CAMPAIGNS RETURNING COST' },
-    { v: money(d.opportunities.totalAddressable), s: '', l: 'ADDRESSABLE OPPORTUNITY' }
-  ];
-  box.innerHTML = items.map((i) =>
-    `<div class="kpi"><div class="v">${esc(i.v)}${i.s ? `<small>${esc(i.s)}</small>` : ''}</div><div class="l">${esc(i.l)}</div></div>`
-  ).join('');
-}
+  const dir = (n) => (n == null ? '' : n >= 0 ? 'up' : 'down');
 
-/* ---------------- Scorecard ---------------- */
+  const items = [
+    { l: `Revenue, ${mlabel(d.coverage.latestPeriod)}`, v: money(h.latestRevenue),
+      s: `${pct(h.momPct)} on the month`, c: dir(h.momPct) },
+    { l: 'Year on year', v: pct(h.yoyPct), s: 'same month last year', c: dir(h.yoyPct) },
+    { l: 'Gross margin rate', v: `${h.latestMarginRatePct}%`, s: `${money(h.totalMargin)} to date` },
+    { l: 'Average transaction', v: `$${h.avgTransactionValue}`, s: `${num(h.latestTransactions)} transactions` },
+    { l: 'Next three months', v: money(d.forecast.total), s: `${d.forecast.mapePct}% model error` },
+    { l: 'Campaigns earning', v: `${d.campaigns.profitable}/${d.campaigns.total}`,
+      s: `${money(d.campaigns.spendInNegativeRoi)} not returning` }
+  ];
+
+  $('kpis').innerHTML = items.map((i) => `
+    <div class="stat">
+      <div class="stat-l">${esc(i.l)}</div>
+      <div class="stat-v">${esc(i.v)}</div>
+      <div class="stat-s ${i.c || ''}">${esc(i.s)}</div>
+    </div>`).join('');
+}
 
 function renderOpportunities() {
   const d = S.analytics.digest;
@@ -231,14 +241,16 @@ function renderSales() {
     data: {
       labels,
       datasets: [
-        { label: 'Actual', data: [...actual], borderColor: '#F26207', backgroundColor: 'rgba(242,98,7,.06)',
-          borderWidth: 2, pointRadius: 0, pointHoverRadius: 4, tension: .25, fill: true },
-        { label: 'Forecast', data: fLine, borderColor: '#2563EB', borderWidth: 2,
-          borderDash: [5, 4], pointRadius: 0, pointHoverRadius: 4, tension: .25 },
-        { label: 'High', data: fHigh, borderColor: 'transparent', backgroundColor: 'rgba(37,99,235,.14)',
-          pointRadius: 0, fill: '+1' },
-        { label: 'Low', data: fLow, borderColor: 'transparent', backgroundColor: 'rgba(37,99,235,.14)',
-          pointRadius: 0, fill: false }
+        { label: 'Actual', data: [...actual], borderColor: PALETTE.scarlet,
+          backgroundColor: PALETTE.scarletFill, borderWidth: 1.75,
+          pointRadius: 0, pointHoverRadius: 4, pointHoverBackgroundColor: PALETTE.scarlet,
+          tension: .2, fill: true },
+        { label: 'Forecast', data: fLine, borderColor: PALETTE.slate, borderWidth: 1.75,
+          borderDash: [4, 3], pointRadius: 0, pointHoverRadius: 4, tension: .2 },
+        { label: 'High', data: fHigh, borderColor: 'transparent',
+          backgroundColor: PALETTE.slateFill, pointRadius: 0, fill: '+1' },
+        { label: 'Low', data: fLow, borderColor: 'transparent',
+          backgroundColor: PALETTE.slateFill, pointRadius: 0, fill: false }
       ]
     },
     options: {
@@ -252,8 +264,10 @@ function renderSales() {
         }
       },
       scales: {
-        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 16, font: { size: 11 } } },
-        y: { grid: { color: '#EFEFEC' }, ticks: { callback: (v) => money(v), font: { size: 11 } } }
+        x: { grid: { display: false }, border: { color: '#E3E5E1' },
+          ticks: { maxRotation: 0, autoSkipPadding: 18 } },
+        y: { grid: { color: PALETTE.grid }, border: { display: false },
+          ticks: { callback: (v) => money(v), padding: 8 } }
       }
     }
   });
@@ -303,7 +317,9 @@ function renderHeat() {
       ${row.index.map((ix, i) => {
         const above = ix >= 1;
         const strength = Math.min(1, Math.abs(ix - 1) * 2.6);
-        const bg = above ? `rgba(242,98,7,${(strength * .55).toFixed(3)})` : `rgba(110,118,129,${(strength * .18).toFixed(3)})`;
+        const bg = above
+          ? `rgba(163,24,43,${(strength * .40).toFixed(3)})`
+          : `rgba(58,90,115,${(strength * .16).toFixed(3)})`;
         return `<td style="background:${bg}" title="${esc(mlabel(a.months[i]))}: ${money(row.values[i])}">${(ix).toFixed(2)}</td>`;
       }).join('')}
     </tr>`).join('');
@@ -377,10 +393,10 @@ function renderPromo() {
           c
         })),
         backgroundColor: cs.map((c) => S.selectedCampaign === c.id
-          ? 'rgba(242,98,7,.75)'
-          : (c.profitable ? 'rgba(22,163,74,.42)' : 'rgba(220,38,38,.38)')),
+          ? 'rgba(163,24,43,.62)'
+          : (c.profitable ? 'rgba(47,106,76,.42)' : 'rgba(163,24,43,.34)')),
         borderColor: cs.map((c) => S.selectedCampaign === c.id
-          ? '#D95700' : (c.profitable ? '#15803D' : '#B91C1C')),
+          ? PALETTE.scarlet : (c.profitable ? PALETTE.green : '#8E1626')),
         borderWidth: cs.map((c) => (S.selectedCampaign === c.id ? 2 : 1))
       }]
     },
@@ -407,9 +423,9 @@ function renderPromo() {
         }
       },
       scales: {
-        x: { title: { display: true, text: 'Spend', font: { size: 11 } }, grid: { color: '#EFEFEC' },
+        x: { title: { display: true, text: 'Spend', font: { size: 11 } }, grid: { color: PALETTE.grid },
           ticks: { callback: (v) => money(v), font: { size: 11 } } },
-        y: { title: { display: true, text: 'ROI %', font: { size: 11 } }, grid: { color: '#EFEFEC' },
+        y: { title: { display: true, text: 'ROI %', font: { size: 11 } }, grid: { color: PALETTE.grid },
           ticks: { callback: (v) => `${v}%`, font: { size: 11 } } }
       }
     }
@@ -434,9 +450,9 @@ function renderPromo() {
       datasets: [{
         data: chans.map((c) => Number(c.roiPct.toFixed(1))),
         backgroundColor: chans.map((c) => S.promoFilter.channel === c.channel
-          ? 'rgba(242,98,7,.8)'
-          : (c.roiPct >= 0 ? 'rgba(22,163,74,.65)' : 'rgba(220,38,38,.6)')),
-        borderRadius: 5
+          ? PALETTE.scarlet
+          : (c.roiPct >= 0 ? PALETTE.greenFill : 'rgba(163,24,43,.42)')),
+        borderRadius: 1
       }]
     },
     options: {
@@ -462,7 +478,7 @@ function renderPromo() {
         }
       },
       scales: {
-        x: { grid: { color: '#EFEFEC' }, ticks: { callback: (v) => `${v}%`, font: { size: 11 } } },
+        x: { grid: { color: PALETTE.grid }, ticks: { callback: (v) => `${v}%`, font: { size: 11 } } },
         y: { grid: { display: false }, ticks: { font: { size: 11 } } }
       }
     }
@@ -563,14 +579,14 @@ function renderLob() {
     type: 'bar',
     data: {
       labels: p.map((x) => x.businessLine),
-      datasets: [{ data: p.map((x) => x.revenue), backgroundColor: 'rgba(242,98,7,.7)', borderRadius: 5 }]
+      datasets: [{ data: p.map((x) => x.revenue), backgroundColor: 'rgba(163,24,43,.62)', borderRadius: 1 }]
     },
     options: {
       responsive: true, maintainAspectRatio: false,
       plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => money(c.parsed.y) } } },
       scales: {
         x: { grid: { display: false }, ticks: { font: { size: 11 } } },
-        y: { grid: { color: '#EFEFEC' }, ticks: { callback: (v) => money(v), font: { size: 11 } } }
+        y: { grid: { color: PALETTE.grid }, ticks: { callback: (v) => money(v), font: { size: 11 } } }
       }
     }
   });
@@ -582,9 +598,9 @@ function renderLob() {
         data: p.map((x) => ({ x: x.trendPct, y: x.marginRatePct, n: x.businessLine, r: x.revenue })),
         pointRadius: 9, pointHoverRadius: 12,
         backgroundColor: p.map((x) =>
-          x.recommendation === 'Scale' ? 'rgba(22,163,74,.6)'
-            : x.recommendation === 'Sustain' ? 'rgba(242,98,7,.55)'
-              : 'rgba(220,38,38,.5)')
+          x.recommendation === 'Scale' ? 'rgba(47,106,76,.62)'
+            : x.recommendation === 'Sustain' ? 'rgba(58,90,115,.55)'
+              : 'rgba(163,24,43,.55)')
       }]
     },
     options: {
@@ -598,9 +614,9 @@ function renderLob() {
         }
       },
       scales: {
-        x: { title: { display: true, text: 'Trend %', font: { size: 11 } }, grid: { color: '#EFEFEC' },
+        x: { title: { display: true, text: 'Trend %', font: { size: 11 } }, grid: { color: PALETTE.grid },
           ticks: { callback: (v) => `${v}%`, font: { size: 11 } } },
-        y: { title: { display: true, text: 'Margin rate %', font: { size: 11 } }, grid: { color: '#EFEFEC' },
+        y: { title: { display: true, text: 'Margin rate %', font: { size: 11 } }, grid: { color: PALETTE.grid },
           ticks: { callback: (v) => `${v}%`, font: { size: 11 } } }
       }
     }
@@ -1084,12 +1100,44 @@ async function doLoadData(replace) {
 
 /* ---------------- Charts ---------------- */
 
+const PALETTE = {
+  scarlet: '#A3182B',
+  scarletFill: 'rgba(163, 24, 43, .07)',
+  green: '#2F6A4C',
+  greenFill: 'rgba(47, 106, 76, .45)',
+  brass: '#96772C',
+  slate: '#3A5A73',
+  slateFill: 'rgba(58, 90, 115, .11)',
+  grid: '#EFF0ED',
+  axis: '#757D82'
+};
+
 function drawChart(id, config) {
   const canvas = $(id);
   if (!canvas) return;
   if (S.charts[id]) S.charts[id].destroy();
-  Chart.defaults.font.family = "'Inter', system-ui, sans-serif";
-  Chart.defaults.color = '#6E7681';
+
+  Chart.defaults.font.family = "'Schibsted Grotesk', system-ui, sans-serif";
+  Chart.defaults.font.size = 11;
+  Chart.defaults.color = PALETTE.axis;
+
+  // Tooltips are set in the interface's own voice rather than Chart.js defaults.
+  const tip = {
+    backgroundColor: '#14181B',
+    titleFont: { family: "'DM Mono', monospace", size: 10, weight: '400' },
+    titleColor: '#8A9299',
+    bodyFont: { family: "'Schibsted Grotesk', sans-serif", size: 12 },
+    bodyColor: '#fff',
+    padding: 10,
+    cornerRadius: 3,
+    displayColors: false,
+    borderColor: '#2A3034',
+    borderWidth: 1
+  };
+  config.options = config.options || {};
+  config.options.plugins = config.options.plugins || {};
+  config.options.plugins.tooltip = { ...tip, ...(config.options.plugins.tooltip || {}) };
+
   S.charts[id] = new Chart(canvas.getContext('2d'), config);
 }
 
@@ -1097,10 +1145,20 @@ function drawChart(id, config) {
 
 function wire() {
   // Tabs
+  const TITLES = {
+    sales: 'Sales & forecast',
+    promo: 'Promotion ROI',
+    lob: 'Lines of business',
+    scenario: 'Scenario',
+    ai: 'AI analyst',
+    admin: 'Admin'
+  };
+
   $('tabs').querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       $('tabs').querySelectorAll('button').forEach((x) => x.classList.toggle('on', x === b));
       document.querySelectorAll('.view').forEach((v) => v.classList.toggle('on', v.id === `v-${b.dataset.v}`));
+      $('pageTitle').textContent = TITLES[b.dataset.v] || '';
       location.hash = b.dataset.v;
       if (b.dataset.v === 'admin') {
         fillAddForm(); loadData(); loadAudit();
