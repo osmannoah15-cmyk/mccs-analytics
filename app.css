@@ -576,23 +576,6 @@ tr.flash td { animation: flash 1.2s ease-out; }
 }
 
 /* ==========================================================================
-   Export dialog
-   ========================================================================== */
-
-.modal-veil {
-  position: fixed; inset: 0; background: rgba(20, 24, 27, .5);
-  display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 60;
-}
-.modal {
-  background: var(--surface); border-radius: 6px; padding: 26px 28px;
-  width: 100%; max-width: 420px; box-shadow: 0 18px 48px rgba(20, 24, 27, .25);
-}
-.modal h2 { font-family: var(--display); font-size: 21px; font-weight: 600; letter-spacing: -.012em; }
-.modal-lede { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 8px 0 20px; }
-.modal .field input, .modal .field select { width: 100%; }
-.modal-actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 22px; }
-
-/* ==========================================================================
    Report
 
    Assembled as its own document rather than printed from the screen.
@@ -740,20 +723,7 @@ tr.flash td { animation: flash 1.2s ease-out; }
   display: flex; justify-content: space-between; gap: 10mm;
 }
 
-.checklist { display: flex; flex-direction: column; gap: 9px; padding: 4px 0 2px; }
-.checklist label {
-  display: flex; align-items: center; gap: 10px; font-size: 13.5px;
-  cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink);
-}
-.checklist input { accent-color: var(--scarlet); width: 15px; height: 15px; cursor: pointer; }
 
-.checklist.scrolly { max-height: 168px; overflow-y: auto; padding-right: 6px; }
-.checkbulk { display: flex; gap: 14px; margin-top: 9px; }
-.checkbulk button {
-  background: none; border: 0; padding: 0; cursor: pointer;
-  font-size: 12px; font-weight: 600; color: var(--scarlet-d);
-}
-.checkbulk button:hover { color: var(--scarlet); text-decoration: underline; }
 #chartFarm { position: fixed; left: -12000px; top: 0; width: 820px; }
 .rep-part {
   break-before: page; border-top: 2px solid #14181B; padding-top: 5mm; margin-bottom: 8mm;
@@ -767,3 +737,103 @@ tr.flash td { animation: flash 1.2s ease-out; }
   line-height: 1.25; margin-top: 2mm; border: 0; padding: 0;
 }
 .rep-part .sub { font-size: 10pt; color: #3F464B; margin-top: 2mm; line-height: 1.5; }
+
+/* ==========================================================================
+   Export dialog
+
+   Native checkboxes sat badly against the uppercase field labels and the
+   scrolling list shifted its own content, so selection is done with proper
+   option rows: the input stays for semantics and keyboard use, and the row
+   carries the visible state.
+   ========================================================================== */
+
+.modal-veil {
+  position: fixed; inset: 0; background: rgba(20, 24, 27, .55);
+  display: flex; align-items: center; justify-content: center; padding: 28px; z-index: 60;
+}
+.modal {
+  background: var(--surface); border-radius: 6px; width: 100%; max-width: 540px;
+  max-height: calc(100vh - 56px); display: flex; flex-direction: column;
+  box-shadow: 0 20px 56px rgba(20, 24, 27, .28);
+}
+
+.modal-head {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 18px;
+  padding: 22px 26px 18px; border-bottom: 1px solid var(--line);
+}
+.modal-head h2 {
+  font-family: var(--display); font-size: 20px; font-weight: 600; letter-spacing: -.01em;
+}
+.modal-head p { color: var(--muted); font-size: 12.5px; line-height: 1.5; margin-top: 4px; }
+.modal-x {
+  background: none; border: 0; cursor: pointer; color: var(--muted);
+  font-size: 24px; line-height: 1; padding: 0 2px; margin: -2px -4px 0 0;
+}
+.modal-x:hover { color: var(--ink); }
+
+.modal-body { padding: 22px 26px; overflow-y: auto; }
+
+.fieldset { margin-bottom: 20px; }
+.fieldset-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  gap: 12px; margin-bottom: 9px;
+}
+.fl {
+  font-size: 10.5px; font-weight: 600; letter-spacing: .07em;
+  text-transform: uppercase; color: var(--muted);
+}
+.fc { font-size: 12px; color: var(--muted); display: flex; gap: 12px; }
+.link {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--scarlet-d);
+}
+.link:hover { color: var(--scarlet); text-decoration: underline; }
+
+.block { width: 100%; }
+.seg.block { display: grid; grid-template-columns: 1fr 1fr; }
+.seg.block button { text-align: center; }
+
+/* ---- Option rows ---- */
+.opt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 520px) { .opt-grid { grid-template-columns: 1fr; } }
+
+.opt {
+  display: flex; align-items: center; gap: 11px;
+  border: 1px solid var(--line); border-radius: 4px; padding: 11px 13px;
+  cursor: pointer; font-size: 13px; line-height: 1.35; color: var(--ink);
+  transition: border-color .12s, background .12s; min-width: 0;
+}
+.opt:hover { border-color: #C6C9C3; background: var(--paper); }
+.opt.wide { width: 100%; align-items: flex-start; }
+.opt.wide em {
+  display: block; font-style: normal; color: var(--muted);
+  font-size: 11.5px; line-height: 1.5; margin-top: 3px;
+}
+.opt > span:last-child { min-width: 0; }
+
+/* The real control stays in the DOM for semantics and keyboard access. */
+.opt input { position: absolute; width: 1px; height: 1px; opacity: 0; margin: 0; }
+.opt .tick {
+  width: 17px; height: 17px; flex: none; border: 1.5px solid #C6C9C3; border-radius: 3px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background .12s, border-color .12s;
+}
+.opt.wide .tick { margin-top: 0; }
+.opt .tick::after {
+  content: ''; width: 9px; height: 5px;
+  border-left: 2px solid #fff; border-bottom: 2px solid #fff;
+  transform: rotate(-45deg) translate(1px, -1px); opacity: 0; transition: opacity .12s;
+}
+.opt input:checked ~ .tick { background: var(--scarlet); border-color: var(--scarlet); }
+.opt input:checked ~ .tick::after { opacity: 1; }
+.opt:has(input:checked) { border-color: var(--scarlet); background: var(--scarlet-w); }
+.opt:focus-within { outline: 2px solid var(--scarlet); outline-offset: 1px; }
+
+.modal-foot {
+  padding: 16px 26px 20px; border-top: 1px solid var(--line);
+  display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap;
+}
+.modal-note { color: var(--muted); font-size: 11.5px; line-height: 1.5; max-width: 26em; }
+.modal-actions { display: flex; gap: 9px; margin-left: auto; }
+
+#chartFarm { position: fixed; left: -12000px; top: 0; width: 820px; }

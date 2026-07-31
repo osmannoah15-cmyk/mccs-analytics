@@ -1620,12 +1620,24 @@ function openReportDialog() {
   const box = $('repInstalls');
   if (!box.dataset.filled) {
     box.innerHTML = (S.meta?.installations || [])
-      .map((n) => `<label><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>`).join('');
+      .map((n) => `<label class="opt"><input type="checkbox" value="${esc(n)}" checked>
+        <span class="tick"></span><span>${esc(n)}</span></label>`).join('');
     box.dataset.filled = '1';
   }
 
+  updateRepCounts();
   $('reportVeil').hidden = false;
   $('repTitleIn').focus();
+}
+
+function updateRepCounts() {
+  const pages = $('repPages').querySelectorAll('input:checked').length;
+  $('repPagesCount').textContent = pages ? `${pages} selected` : 'none selected';
+  const box = $('repInstalls');
+  const total = box.querySelectorAll('input').length;
+  const on = box.querySelectorAll('input:checked').length;
+  const head = box.closest('.fieldset').querySelector('.fl');
+  if (head) head.textContent = total ? `Installations (${on} of ${total})` : 'Installations';
 }
 
 function setReportMode(mode) {
@@ -1633,6 +1645,7 @@ function setReportMode(mode) {
   const pack = mode === 'pack';
   $('repPackOpts').hidden = !pack;
   $('repPagesField').hidden = pack;
+  updateRepCounts();
   $('repTitleIn').value = pack
     ? ($('repTitleIn').value.includes('Pack') ? $('repTitleIn').value : 'Installation Performance Pack')
     : ($('repTitleIn').value === 'Installation Performance Pack' ? 'Revenue Intelligence Review' : $('repTitleIn').value);
@@ -1958,8 +1971,17 @@ function wire() {
   $('repMode').querySelectorAll('button').forEach((b) => {
     b.onclick = () => setReportMode(b.dataset.mode);
   });
-  $('repAllInst').onclick = () => $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = true; });
-  $('repNoInst').onclick = () => $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = false; });
+  $('repAllInst').onclick = () => {
+    $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = true; });
+    updateRepCounts();
+  };
+  $('repNoInst').onclick = () => {
+    $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = false; });
+    updateRepCounts();
+  };
+  $('repPages').onchange = updateRepCounts;
+  $('repInstalls').onchange = updateRepCounts;
+  $('repClose').onclick = () => { $('reportVeil').hidden = true; };
   $('repGo').onclick = runReportExport;
   $('reportVeil').onclick = (e) => { if (e.target === $('reportVeil')) $('reportVeil').hidden = true; };
   document.addEventListener('keydown', (e) => {

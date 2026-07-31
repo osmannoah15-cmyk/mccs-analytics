@@ -410,64 +410,83 @@
 
 
 <div class="modal-veil" id="reportVeil" hidden>
-  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="repTitle">
-    <h2 id="repTitle">Export report</h2>
-    <p class="modal-lede">Builds a formatted document from the pages you choose, carrying the filters currently in force. Choose <b>Save as PDF</b> in the print dialog that follows.</p>
-
-    <div class="field">
-      <label>Report type</label>
-      <div class="seg" id="repMode" style="width:100%">
-        <button data-mode="single" class="on" style="flex:1">Single report</button>
-        <button data-mode="pack" style="flex:1">Installation pack</button>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="repHeading">
+    <header class="modal-head">
+      <div>
+        <h2 id="repHeading">Export report</h2>
+        <p>Formatted for print, carrying the filters currently in force.</p>
       </div>
-    </div>
+      <button class="modal-x" id="repClose" aria-label="Close">&times;</button>
+    </header>
 
-    <div id="repPackOpts" hidden>
-      <div class="field">
-        <label>Installations</label>
-        <div class="checklist scrolly" id="repInstalls"></div>
-        <div class="checkbulk">
-          <button type="button" id="repAllInst">Select all</button>
-          <button type="button" id="repNoInst">Clear</button>
+    <div class="modal-body">
+      <div class="fieldset">
+        <div class="fieldset-head"><span class="fl">Report type</span></div>
+        <div class="seg block" id="repMode">
+          <button data-mode="single" class="on">Single report</button>
+          <button data-mode="pack">Installation pack</button>
         </div>
       </div>
-      <div class="field">
-        <label for="repDelivery">Deliver as</label>
-        <select id="repDelivery">
-          <option value="combined">One document, a part per installation</option>
-          <option value="separate">Separate files, one print dialog each</option>
-        </select>
+
+      <div class="fieldset" id="repPagesField">
+        <div class="fieldset-head">
+          <span class="fl">Pages to include</span>
+          <span class="fc" id="repPagesCount"></span>
+        </div>
+        <div class="opt-grid" id="repPages">
+          <label class="opt"><input type="checkbox" value="sales" checked>
+            <span class="tick"></span><span>Sales &amp; forecast</span></label>
+          <label class="opt"><input type="checkbox" value="promo">
+            <span class="tick"></span><span>Promotion ROI</span></label>
+          <label class="opt"><input type="checkbox" value="lob">
+            <span class="tick"></span><span>Lines of business</span></label>
+          <label class="opt"><input type="checkbox" value="scenario">
+            <span class="tick"></span><span>Scenario</span></label>
+        </div>
       </div>
-    </div>
 
-    <div class="field" id="repPagesField">
-      <label>Pages to include</label>
-      <div class="checklist" id="repPages">
-        <label><input type="checkbox" value="sales" checked> Sales &amp; forecast</label>
-        <label><input type="checkbox" value="promo"> Promotion ROI</label>
-        <label><input type="checkbox" value="lob"> Lines of business</label>
-        <label><input type="checkbox" value="scenario"> Scenario</label>
+      <div id="repPackOpts" hidden>
+        <div class="fieldset">
+          <div class="fieldset-head">
+            <span class="fl">Installations</span>
+            <span class="fc"><button type="button" class="link" id="repAllInst">All</button><button type="button" class="link" id="repNoInst">None</button></span>
+          </div>
+          <div class="opt-grid" id="repInstalls"></div>
+        </div>
+
+        <div class="fieldset">
+          <div class="fieldset-head"><span class="fl">Deliver as</span></div>
+          <select id="repDelivery" class="block">
+            <option value="combined">One document, a part per installation</option>
+            <option value="separate">Separate files, one print dialog each</option>
+          </select>
+        </div>
       </div>
+
+      <div class="fieldset">
+        <div class="fieldset-head"><span class="fl">Report title</span></div>
+        <input type="text" id="repTitleIn" class="block" value="Revenue Intelligence Review" maxlength="80">
+      </div>
+
+      <div class="fieldset">
+        <div class="fieldset-head"><span class="fl">Prepared for</span></div>
+        <input type="text" id="repFor" class="block" value="MCCS Headquarters" maxlength="80">
+      </div>
+
+      <label class="opt wide">
+        <input type="checkbox" id="repBrief" checked>
+        <span class="tick"></span>
+        <span>Include a written summary<em>Assessment generated from the figures in the report</em></span>
+      </label>
     </div>
 
-    <div class="field">
-      <label for="repTitleIn">Report title</label>
-      <input type="text" id="repTitleIn" value="Revenue Intelligence Review" maxlength="80">
-    </div>
-
-    <div class="field">
-      <label for="repFor">Prepared for</label>
-      <input type="text" id="repFor" value="MCCS Headquarters" maxlength="80">
-    </div>
-
-    <label class="toggle"><input type="checkbox" id="repBrief" checked>
-      <span>Include a written summary</span></label>
-    <p class="hint" style="margin-top:6px">Page numbers come from the print dialog: switch on Headers and footers if you want them.</p>
-
-    <div class="modal-actions">
-      <button class="btn quiet" id="repCancel">Cancel</button>
-      <button class="btn" id="repGo">Build report</button>
-    </div>
+    <footer class="modal-foot">
+      <p class="modal-note">For page numbers, switch on Headers and footers in the print dialog.</p>
+      <div class="modal-actions">
+        <button class="btn quiet" id="repCancel">Cancel</button>
+        <button class="btn" id="repGo">Build report</button>
+      </div>
+    </footer>
   </div>
 </div>
 
