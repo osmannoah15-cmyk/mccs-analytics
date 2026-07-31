@@ -1117,16 +1117,16 @@ function drawChart(id, config) {
   if (!canvas) return;
   if (S.charts[id]) S.charts[id].destroy();
 
-  Chart.defaults.font.family = "'Schibsted Grotesk', system-ui, sans-serif";
+  Chart.defaults.font.family = "'Source Sans 3', system-ui, sans-serif";
   Chart.defaults.font.size = 11;
   Chart.defaults.color = PALETTE.axis;
 
   // Tooltips are set in the interface's own voice rather than Chart.js defaults.
   const tip = {
     backgroundColor: '#14181B',
-    titleFont: { family: "'DM Mono', monospace", size: 10, weight: '400' },
+    titleFont: { family: "'Source Sans 3', sans-serif", size: 11, weight: '600' },
     titleColor: '#8A9299',
-    bodyFont: { family: "'Schibsted Grotesk', sans-serif", size: 12 },
+    bodyFont: { family: "'Source Sans 3', sans-serif", size: 12.5 },
     bodyColor: '#fff',
     padding: 10,
     cornerRadius: 3,

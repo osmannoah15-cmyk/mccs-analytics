@@ -225,6 +225,12 @@ Admin tab, add each person with the **viewer** role. Viewers can explore everyth
 
 ---
 
+## Design
+
+Type is Source Serif 4 for figures and titles, Source Sans 3 for everything else. They are a matched superfamily drawn for institutional reading. There is deliberately no monospace: a terminal face on every label read as a developer tool rather than something a program office would use.
+
+Every text colour clears WCAG AA against its background, including the small uppercase labels, which is why the muted grey and the brass accent are darker than they first appear.
+
 ## Branding
 
 The Dexian Government Solutions mark is served from `/logo.png`, which maps to `logo-light.png` (white, transparent) for the dark navigation rail and sign-in panel. `logo-dark.png` is the same artwork in ink for use on light surfaces.
