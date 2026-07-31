@@ -574,3 +574,149 @@ tr.flash td { animation: flash 1.2s ease-out; }
   font-family: var(--ui); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .08em;
   color: var(--muted); margin-bottom: 10px;
 }
+
+/* ==========================================================================
+   Export dialog
+   ========================================================================== */
+
+.modal-veil {
+  position: fixed; inset: 0; background: rgba(20, 24, 27, .5);
+  display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 60;
+}
+.modal {
+  background: var(--surface); border-radius: 6px; padding: 26px 28px;
+  width: 100%; max-width: 420px; box-shadow: 0 18px 48px rgba(20, 24, 27, .25);
+}
+.modal h2 { font-family: var(--display); font-size: 21px; font-weight: 600; letter-spacing: -.012em; }
+.modal-lede { color: var(--muted); font-size: 13px; line-height: 1.6; margin: 8px 0 20px; }
+.modal .field input, .modal .field select { width: 100%; }
+.modal-actions { display: flex; gap: 9px; justify-content: flex-end; margin-top: 22px; }
+
+/* ==========================================================================
+   Report
+   Hidden on screen. The print sheet below turns it into the document.
+   ========================================================================== */
+
+#report { display: none; }
+
+@media print {
+  /* Letter with a generous measure, so tables are not cramped. */
+  @page { size: letter portrait; margin: 16mm 14mm 22mm; }
+
+  html, body { background: #fff !important; font-size: 10.5pt; }
+  .app, .modal-veil, .skip { display: none !important; }
+  #report { display: block !important; padding-bottom: 8mm; }
+
+  /* Never split a figure, a table row, or a heading from what follows it. */
+  .rep-card, .rep-figs, table, tr, .rep-chart { break-inside: avoid; }
+  h1, h2, h3 { break-after: avoid; }
+  a { text-decoration: none; color: inherit; }
+}
+
+/* ---- Cover ---- */
+.rep-cover { break-after: page; padding-top: 6mm; }
+.rep-cover img { width: 52mm; height: auto; display: block; }
+.rep-rule { border: 0; border-top: 2px solid #14181B; margin: 9mm 0 7mm; }
+.rep-kicker {
+  font-size: 8.5pt; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: #6A7176;
+}
+.rep-cover h1 {
+  font-family: var(--display); font-size: 30pt; font-weight: 600;
+  letter-spacing: -.015em; line-height: 1.12; margin: 4mm 0 3mm; max-width: 20em;
+}
+.rep-cover .rep-sub {
+  font-family: var(--display); font-size: 14pt; font-weight: 400;
+  color: #3F464B; line-height: 1.4; max-width: 30em;
+}
+
+.rep-meta {
+  margin-top: 14mm; border-top: 1px solid #D5D8D3; width: 100%;
+  border-collapse: collapse; font-size: 9.5pt;
+}
+.rep-meta th {
+  text-align: left; font-weight: 600; font-size: 8pt; letter-spacing: .08em;
+  text-transform: uppercase; color: #6A7176; padding: 3mm 8mm 3mm 0;
+  width: 34mm; vertical-align: top; border: 0; background: none;
+}
+.rep-meta td { padding: 3mm 0; border-bottom: 1px solid #EDEEEB; vertical-align: top; }
+
+.rep-notice {
+  margin-top: 12mm; border-left: 2px solid #A3182B; padding: 3mm 0 3mm 4mm;
+  font-size: 9pt; color: #3F464B; line-height: 1.6;
+}
+
+/* ---- Sections ---- */
+.rep-section { break-before: page; padding-top: 2mm; }
+.rep-section:first-of-type { break-before: auto; }
+.rep-section > h2 {
+  font-family: var(--display); font-size: 17pt; font-weight: 600;
+  letter-spacing: -.01em; padding-bottom: 2.5mm; margin-bottom: 5mm;
+  border-bottom: 1.5px solid #14181B;
+}
+.rep-card { margin-bottom: 7mm; }
+.rep-card h3 { font-size: 11pt; font-weight: 600; margin-bottom: 2.5mm; }
+.rep-card .rep-note { font-size: 9pt; color: #6A7176; line-height: 1.6; margin-top: 2mm; }
+.rep-prose { font-size: 10pt; line-height: 1.68; white-space: pre-wrap; color: #23282B; }
+
+/* ---- Figure band ---- */
+.rep-figs {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
+  border-top: 1.5px solid #14181B; border-bottom: 1px solid #D5D8D3; margin-bottom: 7mm;
+}
+.rep-fig { padding: 3.5mm 5mm 4mm 0; border-right: 1px solid #EDEEEB; }
+.rep-fig:nth-child(3n) { border-right: 0; }
+.rep-fig:nth-child(n+4) { border-top: 1px solid #EDEEEB; }
+.rep-fig .l {
+  font-size: 7.5pt; font-weight: 600; letter-spacing: .08em;
+  text-transform: uppercase; color: #6A7176;
+}
+.rep-fig .v {
+  font-family: var(--display); font-size: 17pt; font-weight: 600;
+  letter-spacing: -.01em; margin-top: 1.5mm; font-variant-numeric: tabular-nums;
+}
+.rep-fig .s { font-size: 8.5pt; color: #6A7176; margin-top: 1mm; }
+
+/* ---- Tables ---- */
+.rep-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2mm; }
+.rep-table th {
+  text-align: left; font-weight: 600; font-size: 7.5pt; letter-spacing: .06em;
+  text-transform: uppercase; color: #6A7176; padding: 0 3mm 2mm 0;
+  border-bottom: 1px solid #14181B; white-space: nowrap; background: none; position: static;
+}
+.rep-table td {
+  padding: 1.8mm 3mm 1.8mm 0; border-bottom: .5px solid #EDEEEB;
+  vertical-align: top; font-variant-numeric: tabular-nums;
+}
+.rep-table tbody tr:nth-child(even) { background: #F5F7F1; }
+.rep-table .r { text-align: right; }
+.rep-table .pos { color: #2F6A4C; }
+.rep-table .neg { color: #A3182B; }
+
+/* ---- Charts ---- */
+.rep-chart { margin: 3mm 0 2mm; }
+.rep-chart img { width: 100%; height: auto; display: block; }
+
+/* ---- Findings ---- */
+.rep-find { border-top: 1px solid #D5D8D3; padding: 3.5mm 0; break-inside: avoid; }
+.rep-find .v {
+  font-family: var(--display); font-size: 15pt; font-weight: 600;
+  letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+}
+.rep-find .l { font-size: 10pt; font-weight: 600; margin-top: 1mm; }
+.rep-find .b { font-size: 9pt; color: #6A7176; line-height: 1.6; margin-top: 1.5mm; }
+.rep-find .t { font-size: 8pt; font-weight: 600; color: #8A6D26; margin-top: 2mm; }
+
+/* ---- Running footer, repeated on every page ----
+   Chrome repeats a fixed element on each printed page and positions it
+   against the page content box. A negative offset tries to reach into the
+   page margin and is mispositioned instead, which lands the footer at the
+   top of the page over the content. Anchor it to the content edge and give
+   the page a deep enough bottom margin to sit in. */
+.rep-foot {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  border-top: .5px solid #D5D8D3; padding-top: 2mm;
+  font-size: 7.5pt; color: #6A7176;
+  display: flex; justify-content: space-between; gap: 8mm;
+  background: #fff;
+}

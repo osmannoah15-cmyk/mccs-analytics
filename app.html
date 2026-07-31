@@ -89,6 +89,7 @@
           <select id="fTo"><option value="">Latest</option></select>
         </label>
         <button class="btn quiet sm" id="btnReset">Reset</button>
+        <button class="btn sm" id="btnExportReport">Export report</button>
       </div>
     </header>
 
@@ -406,6 +407,45 @@
     </main>
   </div>
 </div>
+
+
+<div class="modal-veil" id="reportVeil" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="repTitle">
+    <h2 id="repTitle">Export report</h2>
+    <p class="modal-lede">Builds a formatted document from what is on screen now, including the filters in force. In the print dialog that follows, choose <b>Save as PDF</b>, and switch <b>Headers and footers</b> on if you want page numbers.</p>
+
+    <div class="field">
+      <label for="repScope">Include</label>
+      <select id="repScope">
+        <option value="page">This page only</option>
+        <option value="all">Every analysis page</option>
+      </select>
+    </div>
+
+    <div class="field">
+      <label for="repFor">Prepared for</label>
+      <input type="text" id="repFor" value="MCCS Headquarters" maxlength="80">
+    </div>
+
+    <div class="field">
+      <label for="repTitleIn">Report title</label>
+      <input type="text" id="repTitleIn" value="Revenue Intelligence Review" maxlength="80">
+    </div>
+
+    <label class="toggle" style="margin-bottom:6px">
+      <input type="checkbox" id="repBrief" checked>
+      <span>Include a written executive summary</span>
+    </label>
+    <p class="hint" style="margin-top:0">Generated from the figures in the report. Adds a few seconds.</p>
+
+    <div class="modal-actions">
+      <button class="btn quiet" id="repCancel">Cancel</button>
+      <button class="btn" id="repGo">Build report</button>
+    </div>
+  </div>
+</div>
+
+<div id="report" aria-hidden="true"></div>
 
 
 <script src="/client.js"></script>

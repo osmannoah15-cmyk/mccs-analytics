@@ -225,6 +225,16 @@ Admin tab, add each person with the **viewer** role. Viewers can explore everyth
 
 ---
 
+## Reports
+
+**Export report** in the top bar builds a formatted document and hands it to the browser's print pipeline, where **Save as PDF** produces the file. Text stays as vectors, and no headless browser is needed on the server.
+
+The report is assembled separately from the screen rather than printed from it, because printing a dashboard drags along the navigation, the controls and the clipped scroll regions. What you get instead is a cover carrying the title, who it was prepared for and by, the date, and the exact filters in force; an optional written summary; the sections you chose; and a method appendix stating how the forecast, promotion return and anomaly detection are calculated.
+
+Charts are captured as images at three times screen resolution so they hold up in print. Table headers repeat across page breaks, and figures and findings are kept off page boundaries.
+
+Chrome cannot number pages from CSS, so switch **Headers and footers** on in the print dialog if you want page numbers. A running footer carrying the report title and the synthetic-data notice appears on every page either way.
+
 ## Design
 
 Type is Source Serif 4 for figures and titles, Source Sans 3 for everything else. They are a matched superfamily drawn for institutional reading. There is deliberately no monospace: a terminal face on every label read as a developer tool rather than something a program office would use.
