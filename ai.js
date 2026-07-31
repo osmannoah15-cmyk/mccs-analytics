@@ -83,7 +83,7 @@ router.post('/brief', async (req, res, next) => {
 
     const prompt = `Write an executive briefing in five short paragraphs covering, in order:
 1. Latest month performance against the prior month and the same month last year.
-2. The three month forecast and what the forecast accuracy figure implies about confidence.
+2. The three month forecast, and what the tested accuracy figure implies about confidence. The accuracy figure is measured out of sample, by holding back recent months and scoring against them, so treat it as a real indication rather than a fit statistic.
 3. Installation performance, naming the strongest and weakest.
 4. Promotion economics, including how much spend sits in campaigns that do not return their cost.
 5. The single highest value action to take next, with the dollar figure attached.
@@ -241,7 +241,7 @@ function fallbackBrief(d) {
 
 Revenue for the latest month was ${money(h.latestRevenue)}, ${pct(h.momPct)} against the prior month and ${pct(h.yoyPct)} year over year, at a ${h.latestMarginRatePct}% gross margin rate.
 
-The model projects ${money(d.forecast.total)} across the next three months, with in-sample error of ${d.forecast.mapePct}%. Monthly trend is ${d.forecast.monthlyTrend > 0 ? 'positive' : 'negative'} at ${money(Math.abs(d.forecast.monthlyTrend))} per month.
+The model projects ${money(d.forecast.total)} across the next three months. Tested against the ${d.forecast.backtest ? d.forecast.backtest.holdoutMonths : 3} most recent months, which it was not trained on, it was off by ${d.forecast.accuracyPct}% on average. Monthly trend is ${d.forecast.monthlyTrend > 0 ? 'positive' : 'negative'} at ${money(Math.abs(d.forecast.monthlyTrend))} per month.
 
 ${top.installation} leads growth at ${pct(top.growthPct)}. ${bottom.installation} trails at ${pct(bottom.growthPct)} and is the first place to look for underperformance.
 
@@ -283,7 +283,7 @@ function fallbackAnswer(question, d) {
   }
   if (has('forecast', 'holiday', 'season', 'expect', 'next', 'project')) {
     const periods = d.forecast.periods.map((p) => `${p.period}: ${money(p.value)}`).join(', ');
-    return `The three month projection totals ${money(d.forecast.total)} (${periods}), with in-sample error of ${d.forecast.mapePct}%. The seasonal pattern in the data puts the strongest months in November and December.`;
+    return `The three month projection totals ${money(d.forecast.total)} (${periods}). Accuracy is measured by holding out the most recent months and scoring against them: ${d.forecast.accuracyPct}% average error, ${d.forecast.backtest ? d.forecast.backtest.worstMonthPct + '% in the worst month' : ''}. The seasonal pattern puts the strongest months in November and December.`;
   }
   if (has('campaign', 'promo', 'worst', 'best')) {
     const w = d.campaigns.worst[0], b = d.campaigns.best[0];

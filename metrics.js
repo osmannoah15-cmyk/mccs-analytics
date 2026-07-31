@@ -39,9 +39,12 @@ function seriesFor(rows, months, metric = 'revenue') {
  * Same method as the original prototype, moved server-side and exposed with
  * the diagnostics an analyst would actually want to see.
  */
-function forecast(y, ahead = 3) {
+/**
+ * Fit a seasonal index against a linear trend on the deseasonalised series.
+ * Split out so the same fit can be run on a subset of history for backtesting.
+ */
+function fitSeasonalTrend(y) {
   const n = y.length;
-  if (n < 4) return { points: [], slope: 0, seasonalIndex: [], mape: null };
   const monthOf = (i) => i % 12;
 
   const buckets = Array.from({ length: 12 }, () => []);
@@ -62,23 +65,73 @@ function forecast(y, ahead = 3) {
   const resid = deseason.map((v, i) => v - (intercept + slope * i));
   const sd = Math.sqrt(sum(resid.map((r) => r * r)) / n);
 
-  // In-sample MAPE gives the room a defensible accuracy statement.
-  const ape = y.map((v, i) => (v ? Math.abs(v - fitted[i]) / v : 0));
-  const mape = round((sum(ape) / n) * 100, 1);
+  return { n, slope, intercept, sIdx, sd, fitted, monthOf };
+}
 
+const projectAt = (fit, i) => (fit.intercept + fit.slope * i) * fit.sIdx[fit.monthOf(i)];
+
+const mapeOf = (actual, predicted) => {
+  const pairs = actual.map((v, i) => [v, predicted[i]]).filter(([v]) => v);
+  if (!pairs.length) return null;
+  return round((sum(pairs.map(([v, p]) => Math.abs(v - p) / v)) / pairs.length) * 100, 1);
+};
+
+/**
+ * Hold out the most recent months, fit on the rest, and score the forecast
+ * against months the model never saw.
+ *
+ * This is the number worth quoting. In-sample error only says how well the
+ * curve was drawn through points it was given, and on data with a clean
+ * seasonal structure it flatters the model badly.
+ */
+function backtest(y, holdout = 3) {
+  // A seasonal fit needs at least a year of history left after the holdout.
+  if (y.length < 12 + holdout) return null;
+
+  const train = y.slice(0, y.length - holdout);
+  const actual = y.slice(-holdout);
+  const fit = fitSeasonalTrend(train);
+  const predicted = actual.map((_, k) => projectAt(fit, train.length + k));
+
+  return {
+    holdoutMonths: holdout,
+    trainedOn: train.length,
+    mapePct: mapeOf(actual, predicted),
+    worstMonthPct: round(Math.max(...actual.map((v, i) => (v ? Math.abs(v - predicted[i]) / v * 100 : 0))), 1),
+    points: actual.map((v, i) => ({
+      actual: round(v),
+      predicted: round(predicted[i]),
+      errorPct: v ? round(((predicted[i] - v) / v) * 100, 1) : null
+    }))
+  };
+}
+
+function forecast(y, ahead = 3) {
+  const n = y.length;
+  if (n < 4) return { points: [], slope: 0, seasonalIndex: [], mape: null, backtest: null };
+
+  const fit = fitSeasonalTrend(y);
   const points = [];
   for (let k = 0; k < ahead; k++) {
     const i = n + k;
-    const s = sIdx[monthOf(i)];
-    const base = intercept + slope * i;
+    const s = fit.sIdx[fit.monthOf(i)];
+    const base = fit.intercept + fit.slope * i;
     points.push({
       step: k + 1,
       value: round(base * s, 2),
-      low: round((base - 1.28 * sd) * s, 2),
-      high: round((base + 1.28 * sd) * s, 2)
+      low: round((base - 1.28 * fit.sd) * s, 2),
+      high: round((base + 1.28 * fit.sd) * s, 2)
     });
   }
-  return { points, slope: round(slope, 2), seasonalIndex: sIdx.map((v) => round(v, 3)), mape, fitted };
+
+  return {
+    points,
+    slope: round(fit.slope, 2),
+    seasonalIndex: fit.sIdx.map((v) => round(v, 3)),
+    mape: mapeOf(y, fit.fitted),        // in-sample, kept for reference only
+    backtest: backtest(y, ahead),       // out-of-sample, the honest figure
+    fitted: fit.fitted
+  };
 }
 
 /** Add N months to a 'YYYY-MM-DD' string. */
@@ -787,7 +840,14 @@ function buildDigest(rows, campaignRows, filters = {}) {
     forecast: {
       periods: f.points.map((p, i) => ({ period: addMonths(last, i + 1), ...p })),
       total: round(forecastTotal),
-      mapePct: f.mape,
+      // Out-of-sample is the figure worth quoting; in-sample is kept only so
+      // the two can be shown side by side in the method appendix.
+      accuracyPct: f.backtest ? f.backtest.mapePct : null,
+      accuracyBasis: f.backtest
+        ? `held out the last ${f.backtest.holdoutMonths} months, trained on ${f.backtest.trainedOn}`
+        : 'not enough history for a backtest',
+      backtest: f.backtest,
+      inSampleMapePct: f.mape,
       monthlyTrend: f.slope
     },
     installations: installs,
@@ -808,7 +868,7 @@ function buildDigest(rows, campaignRows, filters = {}) {
 }
 
 module.exports = {
-  monthsOf, seriesFor, forecast, addMonths,
+  monthsOf, seriesFor, forecast, backtest, fitSeasonalTrend, addMonths,
   campaignMetrics, channelRollup, linesOfBusiness, installationRollup,
   anomalies, opportunities, scorecard, scenario, buildDigest,
   formatMoney, round, sum

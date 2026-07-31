@@ -239,6 +239,14 @@ Contents
 n+1 Method   how the forecast, promotion return and anomaly scoring work
 ```
 
+### Forecast accuracy
+
+The accuracy figure quoted in the app and in reports is measured **out of sample**. The three most recent months are held back, the model is fitted on the rest, and its projections are scored against months it never saw.
+
+On the shipped dataset that gives 1.0% mean absolute error, worst month 1.4%, against 0.5% measured in sample. The in-sample figure is still computed and appears once in the method appendix, labelled as such, because it only describes how closely the curve was drawn through the points it was handed.
+
+The report includes a backtest table showing each held-out month, what was projected, and the error.
+
 ### Installation packs
 
 Switch the export to **Installation pack** and it produces one part per installation instead of an enterprise roll-up. Each part carries that installation's own figures, its monthly performance and projection, its lines of business, its campaigns, and its own findings, so a part can be handed to an installation director on its own.
@@ -255,6 +263,14 @@ The report is assembled separately from the screen rather than printed from it, 
 Charts are captured at three times screen resolution so they hold up in print, table headers repeat across page breaks, and figures and findings are kept off page boundaries. Nothing uses `position: fixed`: Chrome repeats fixed elements on every printed page but positions them against the viewport, which drops a running footer straight onto the section headings.
 
 Chrome cannot number pages from CSS, so switch **Headers and footers** on in the print dialog if you want page numbers.
+
+## Self-contained assets
+
+Chart.js and both typefaces are npm dependencies served from `node_modules`, not from public CDNs. `npm install` fetches them, so nothing is downloaded at runtime and the app works on a network that blocks outside hosts. A blocked CDN would previously have left every chart blank rather than degrading, which is why this matters more than it sounds.
+
+The server checks at boot that the expected files are present and logs `ASSET MISSING` or `ASSET LAYOUT CHANGED` if not, so a packaging problem shows up in the deploy log rather than as blank charts.
+
+Icons are generated from the supplied logo: the `d` cropped from the wordmark, set in white on a scarlet tile. Small sizes carry less padding and a slightly thickened stroke, because the letterform is light and its strokes otherwise fall below one pixel and vanish at 16px.
 
 ## Design
 

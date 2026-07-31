@@ -2,6 +2,7 @@
 require('dotenv').config();
 
 const path = require('path');
+const fs = require('fs');
 const express = require('express');
 const helmet = require('helmet');
 const session = require('express-session');
@@ -24,9 +25,10 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       // Chart.js is loaded from a CDN and the pages use inline handlers.
-      scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com'],
-      styleSrc: ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
-      fontSrc: ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      // Everything is served from this origin now, so no external hosts.
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      fontSrc: ["'self'", 'data:'],
       imgSrc: ["'self'", 'data:'],
       connectSrc: ["'self'"],
       objectSrc: ["'none'"],
@@ -91,6 +93,57 @@ app.get('/app.css', (_req, res) => {
 app.get('/client.js', requireAuth, (_req, res) => {
   res.type('application/javascript').sendFile(path.join(__dirname, 'client.js'));
 });
+/**
+ * Vendored assets.
+ *
+ * Chart.js and the typefaces used to come from public CDNs. On a restricted
+ * government network either can be blocked, and a missing Chart.js leaves
+ * every chart blank rather than degrading. They are npm dependencies now and
+ * are served from node_modules, so the app carries everything it needs.
+ */
+const VENDOR = [
+  ['/vendor/chart.js', 'chart.js/dist/chart.umd.js', 'application/javascript', []],
+  ['/vendor/sans', '@fontsource/source-sans-3', null, ['400.css', '600.css']],
+  ['/vendor/serif', '@fontsource/source-serif-4', null, ['400.css', '600.css']]
+];
+for (const [route, pkg, type, expect] of VENDOR) {
+  const target = path.join(__dirname, 'node_modules', pkg);
+  if (!fs.existsSync(target)) {
+    console.warn(`ASSET MISSING: ${pkg} is not installed. Run npm install. ` +
+      (type ? 'Charts will not render.' : 'Type will fall back to system fonts.'));
+    continue;
+  }
+  // Confirm the files actually referenced are present, so a packaging change
+  // upstream surfaces here rather than as blank charts or fallback type.
+  const absent = expect.filter((f) => !fs.existsSync(path.join(target, f)));
+  if (absent.length) {
+    console.warn(`ASSET LAYOUT CHANGED: ${pkg} is missing ${absent.join(', ')}. ` +
+      'Type will fall back to system fonts.');
+  }
+  if (type) {
+    app.get(route, (_req, res) => {
+      res.type(type).set('Cache-Control', isProd ? 'public, max-age=604800' : 'no-cache')
+         .sendFile(target);
+    });
+  } else {
+    app.use(route, express.static(target, { maxAge: isProd ? '7d' : 0 }));
+  }
+}
+
+// Icons. Reachable while signed out, since the sign-in page shows them too.
+const ICONS = [
+  ['/favicon.ico', 'favicon.ico', 'image/x-icon'],
+  ['/icon-32.png', 'icon-32.png', 'image/png'],
+  ['/icon-180.png', 'icon-180.png', 'image/png'],
+  ['/icon-512.png', 'icon-512.png', 'image/png']
+];
+for (const [route, file, type] of ICONS) {
+  app.get(route, (_req, res) => {
+    res.type(type).set('Cache-Control', isProd ? 'public, max-age=604800' : 'no-cache')
+       .sendFile(path.join(__dirname, file));
+  });
+}
+
 // The mark is on the sign-in page too, so it stays outside the auth gate.
 app.get('/logo.png', (_req, res) => {
   res.type('image/png')

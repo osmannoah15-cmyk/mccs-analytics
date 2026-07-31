@@ -194,7 +194,8 @@ function renderKpis() {
     { l: 'Year on year', v: pct(h.yoyPct), s: 'same month last year', c: dir(h.yoyPct) },
     { l: 'Gross margin rate', v: `${h.latestMarginRatePct}%`, s: `${money(h.totalMargin)} to date` },
     { l: 'Average transaction', v: `$${h.avgTransactionValue}`, s: `${num(h.latestTransactions)} transactions` },
-    { l: 'Next three months', v: money(d.forecast.total), s: `${d.forecast.mapePct}% model error` },
+    { l: 'Next three months', v: money(d.forecast.total),
+      s: d.forecast.accuracyPct == null ? 'projection' : `${d.forecast.accuracyPct}% tested error` },
     { l: 'Campaigns earning', v: `${d.campaigns.profitable}/${d.campaigns.total}`,
       s: `${money(d.campaigns.spendInNegativeRoi)} not returning` }
   ];
@@ -275,7 +276,10 @@ function renderSales() {
   const f = a.forecast;
   $('forecastNote').textContent =
     `Projection totals ${money(f.periods.reduce((x, p) => x + p.value, 0))} over three months. ` +
-    `In-sample error ${f.mape}%. Monthly trend ${money(f.slope)} per month.`;
+    (f.backtest
+      ? `Tested against the ${f.backtest.holdoutMonths} most recent months, which the model was not trained on: ${f.backtest.mapePct}% average error, ${f.backtest.worstMonthPct}% worst month. `
+      : 'Not enough history to test the model against unseen months. ') +
+    `Monthly trend ${money(f.slope)} per month.`;
 
   renderSignals();
   renderMovers();
@@ -1304,7 +1308,8 @@ function secSummary(n, summaryText) {
     ['Year on year', pct(h.yoyPct), 'against the same month last year'],
     ['Gross margin rate', `${h.latestMarginRatePct}%`, money(h.totalMargin) + ' of margin to date'],
     ['Average transaction', `$${h.avgTransactionValue}`, num(h.latestTransactions) + ' transactions'],
-    ['Next three months', money(d.forecast.total), `${d.forecast.mapePct}% in-sample error`],
+    ['Next three months', money(d.forecast.total),
+      d.forecast.accuracyPct == null ? 'projection' : `${d.forecast.accuracyPct}% tested error`],
     ['Campaigns earning', `${d.campaigns.profitable} of ${d.campaigns.total}`, money(d.campaigns.spendInNegativeRoi) + ' not returning cost']
   ];
 
@@ -1449,7 +1454,18 @@ function secMethod(n) {
   const d = S.analytics.digest;
   return repSection(n, 'Method',
     repBlock('Forecast',
-      `<div class="rep-note" style="margin-top:0">A seasonal index is estimated from the monthly history and applied to a linear trend fitted to the deseasonalised series. The interval covers 80% and comes from the spread of in-sample residuals. Reported error is mean absolute percentage error measured in sample, currently ${d.forecast.mapePct}%, which will understate error on months the model has not seen.</div>`) +
+      `<div class="rep-note" style="margin-top:0">A seasonal index is estimated from the monthly history and applied to a linear trend fitted to the deseasonalised series. The interval covers 80% and comes from the spread of residuals.
+
+Accuracy is measured by backtest rather than by fit. The most recent ${d.forecast.backtest ? d.forecast.backtest.holdoutMonths : 3} months are held out, the model is trained on the remaining ${d.forecast.backtest ? d.forecast.backtest.trainedOn : ''} months, and its projections are scored against months it never saw. That gives ${d.forecast.accuracyPct == null ? 'no result, as there is not enough history' : d.forecast.accuracyPct + '% mean absolute error, worst month ' + d.forecast.backtest.worstMonthPct + '%'}.
+
+For reference, error measured against the months the model was fitted on is ${d.forecast.inSampleMapePct}%. That figure is not quoted elsewhere because it only describes how closely the curve was drawn through points it was given.</div>`) +
+    (d.forecast.backtest ? repBlock('Backtest detail', repTable(
+      ['Month', { t: 'Actual', r: 1 }, { t: 'Projected', r: 1 }, { t: 'Error', r: 1 }],
+      d.forecast.backtest.points.map((pt, i) => [
+        mlabel(ctx().months[ctx().months.length - d.forecast.backtest.holdoutMonths + i]),
+        { t: money(pt.actual), r: 1 }, { t: money(pt.predicted), r: 1 },
+        { t: pct(pt.errorPct), r: 1, cls: Math.abs(pt.errorPct) < 5 ? 'pos' : 'neg' }])),
+      'Each of these months was withheld from the model before it projected them.') : '') +
     repBlock('Promotion return',
       '<div class="rep-note" style="margin-top:0">Incremental revenue is promotional period sales less the baseline period. Incremental margin applies the margin rate recorded against that campaign. Return is incremental margin less spend, over spend, so zero is break-even rather than a target.</div>') +
     repBlock('Unusual movements',
@@ -1471,7 +1487,8 @@ function partInstallation(part, c) {
     ['Year on year', pct(h.yoyPct), 'against the same month last year'],
     ['Gross margin rate', `${h.latestMarginRatePct}%`, money(h.totalMargin) + ' of margin to date'],
     ['Average transaction', `$${h.avgTransactionValue}`, num(h.latestTransactions) + ' transactions'],
-    ['Next three months', money(d.forecast.total), `${d.forecast.mapePct}% in-sample error`],
+    ['Next three months', money(d.forecast.total),
+      d.forecast.accuracyPct == null ? 'projection' : `${d.forecast.accuracyPct}% tested error`],
     ['Campaigns earning', `${d.campaigns.profitable} of ${d.campaigns.total}`,
       money(d.campaigns.spendInNegativeRoi) + ' not returning cost']
   ];
