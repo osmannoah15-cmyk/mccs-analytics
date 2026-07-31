@@ -594,129 +594,176 @@ tr.flash td { animation: flash 1.2s ease-out; }
 
 /* ==========================================================================
    Report
-   Hidden on screen. The print sheet below turns it into the document.
+
+   Assembled as its own document rather than printed from the screen.
+   No position:fixed anywhere: Chrome repeats fixed elements on every printed
+   page but positions them against the viewport, which drops a running footer
+   straight on top of the section headings.
    ========================================================================== */
 
 #report { display: none; }
 
 @media print {
-  /* Letter with a generous measure, so tables are not cramped. */
-  @page { size: letter portrait; margin: 16mm 14mm 22mm; }
+  @page { size: letter portrait; margin: 18mm 16mm 20mm; }
 
-  html, body { background: #fff !important; font-size: 10.5pt; }
+  html, body { background: #fff !important; font-size: 10pt; }
   .app, .modal-veil, .skip { display: none !important; }
-  #report { display: block !important; padding-bottom: 8mm; }
+  #report { display: block !important; }
 
-  /* Never split a figure, a table row, or a heading from what follows it. */
-  .rep-card, .rep-figs, table, tr, .rep-chart { break-inside: avoid; }
+  .rep-block, .rep-figs, .rep-find, .rep-chart, tr { break-inside: avoid; }
   h1, h2, h3 { break-after: avoid; }
+  table { break-inside: auto; }
   a { text-decoration: none; color: inherit; }
 }
 
-/* ---- Cover ---- */
-.rep-cover { break-after: page; padding-top: 6mm; }
-.rep-cover img { width: 52mm; height: auto; display: block; }
-.rep-rule { border: 0; border-top: 2px solid #14181B; margin: 9mm 0 7mm; }
+/* ---- Cover ---------------------------------------------------------- */
+.rep-cover { break-after: page; }
+.rep-cover img { width: 50mm; height: auto; display: block; }
+.rep-cover .rule { border: 0; border-top: 2px solid #14181B; margin: 10mm 0 8mm; }
 .rep-kicker {
-  font-size: 8.5pt; font-weight: 600; letter-spacing: .1em;
-  text-transform: uppercase; color: #6A7176;
+  font-size: 8pt; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: #6A7176; margin-bottom: 5mm;
 }
 .rep-cover h1 {
-  font-family: var(--display); font-size: 30pt; font-weight: 600;
-  letter-spacing: -.015em; line-height: 1.12; margin: 4mm 0 3mm; max-width: 20em;
+  font-family: var(--display); font-size: 26pt; font-weight: 600;
+  letter-spacing: 0; line-height: 1.28; margin-bottom: 4mm; max-width: 22em;
 }
 .rep-cover .rep-sub {
-  font-family: var(--display); font-size: 14pt; font-weight: 400;
-  color: #3F464B; line-height: 1.4; max-width: 30em;
+  font-size: 12pt; color: #3F464B; line-height: 1.5; max-width: 32em;
 }
 
-.rep-meta {
-  margin-top: 14mm; border-top: 1px solid #D5D8D3; width: 100%;
-  border-collapse: collapse; font-size: 9.5pt;
-}
+.rep-meta { margin-top: 16mm; width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.rep-meta tr { border-top: .5px solid #DDE0DA; }
+.rep-meta tr:last-child { border-bottom: .5px solid #DDE0DA; }
 .rep-meta th {
-  text-align: left; font-weight: 600; font-size: 8pt; letter-spacing: .08em;
-  text-transform: uppercase; color: #6A7176; padding: 3mm 8mm 3mm 0;
-  width: 34mm; vertical-align: top; border: 0; background: none;
+  text-align: left; font-weight: 600; font-size: 7.5pt; letter-spacing: .09em;
+  text-transform: uppercase; color: #6A7176; padding: 3.5mm 10mm 3.5mm 0;
+  width: 32mm; vertical-align: top; border: 0; background: none;
 }
-.rep-meta td { padding: 3mm 0; border-bottom: 1px solid #EDEEEB; vertical-align: top; }
+.rep-meta td { padding: 3.5mm 0; border: 0; vertical-align: top; line-height: 1.5; }
 
 .rep-notice {
-  margin-top: 12mm; border-left: 2px solid #A3182B; padding: 3mm 0 3mm 4mm;
-  font-size: 9pt; color: #3F464B; line-height: 1.6;
+  margin-top: 14mm; border-left: 2px solid #A3182B; padding: 1mm 0 1mm 5mm;
+  font-size: 9pt; color: #3F464B; line-height: 1.65;
 }
 
-/* ---- Sections ---- */
-.rep-section { break-before: page; padding-top: 2mm; }
-.rep-section:first-of-type { break-before: auto; }
-.rep-section > h2 {
-  font-family: var(--display); font-size: 17pt; font-weight: 600;
-  letter-spacing: -.01em; padding-bottom: 2.5mm; margin-bottom: 5mm;
+/* ---- Contents ------------------------------------------------------- */
+.rep-toc { break-after: page; }
+.rep-toc h2 {
+  font-family: var(--display); font-size: 15pt; font-weight: 600;
+  padding-bottom: 3mm; margin-bottom: 6mm; border-bottom: 1.5px solid #14181B;
+}
+.rep-toc ol { list-style: none; counter-reset: toc; }
+.rep-toc li {
+  counter-increment: toc; display: flex; gap: 5mm; align-items: baseline;
+  padding: 3mm 0; border-bottom: .5px solid #EDEEEB; font-size: 10.5pt;
+}
+.rep-toc li::before {
+  content: counter(toc); font-weight: 600; color: #A3182B;
+  min-width: 7mm; font-variant-numeric: tabular-nums;
+}
+.rep-toc li span { color: #6A7176; font-size: 9pt; margin-left: auto; text-align: right; }
+
+/* ---- Sections ------------------------------------------------------- */
+.rep-sec { break-before: page; }
+.rep-sec:first-of-type { break-before: auto; }
+.rep-sec > h2 {
+  font-family: var(--display); font-size: 16pt; font-weight: 600;
+  letter-spacing: 0; line-height: 1.3; padding-bottom: 3mm; margin-bottom: 6mm;
   border-bottom: 1.5px solid #14181B;
+  display: flex; gap: 5mm; align-items: baseline;
 }
-.rep-card { margin-bottom: 7mm; }
-.rep-card h3 { font-size: 11pt; font-weight: 600; margin-bottom: 2.5mm; }
-.rep-card .rep-note { font-size: 9pt; color: #6A7176; line-height: 1.6; margin-top: 2mm; }
-.rep-prose { font-size: 10pt; line-height: 1.68; white-space: pre-wrap; color: #23282B; }
+.rep-sec > h2 .n { color: #A3182B; font-variant-numeric: tabular-nums; }
 
-/* ---- Figure band ---- */
-.rep-figs {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 0;
-  border-top: 1.5px solid #14181B; border-bottom: 1px solid #D5D8D3; margin-bottom: 7mm;
+.rep-block { margin-bottom: 9mm; }
+.rep-block h3 {
+  font-size: 10.5pt; font-weight: 600; margin-bottom: 3mm;
+  padding-bottom: 1.5mm; border-bottom: .5px solid #DDE0DA;
 }
-.rep-fig { padding: 3.5mm 5mm 4mm 0; border-right: 1px solid #EDEEEB; }
-.rep-fig:nth-child(3n) { border-right: 0; }
-.rep-fig:nth-child(n+4) { border-top: 1px solid #EDEEEB; }
+.rep-note { font-size: 8.5pt; color: #6A7176; line-height: 1.7; margin-top: 3mm; }
+.rep-lead { font-size: 10pt; line-height: 1.7; color: #23282B; margin-bottom: 6mm; max-width: 42em; }
+.rep-prose { font-size: 10pt; line-height: 1.75; white-space: pre-wrap; color: #23282B; }
+
+/* ---- Figures -------------------------------------------------------- */
+.rep-figs {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  border-top: 1.5px solid #14181B; margin-bottom: 8mm;
+}
+.rep-fig { padding: 4mm 6mm 5mm 0; border-bottom: .5px solid #DDE0DA; }
 .rep-fig .l {
   font-size: 7.5pt; font-weight: 600; letter-spacing: .08em;
-  text-transform: uppercase; color: #6A7176;
+  text-transform: uppercase; color: #6A7176; line-height: 1.4;
 }
 .rep-fig .v {
-  font-family: var(--display); font-size: 17pt; font-weight: 600;
-  letter-spacing: -.01em; margin-top: 1.5mm; font-variant-numeric: tabular-nums;
+  font-family: var(--display); font-size: 16pt; font-weight: 600;
+  line-height: 1.2; margin-top: 2mm; font-variant-numeric: tabular-nums;
 }
-.rep-fig .s { font-size: 8.5pt; color: #6A7176; margin-top: 1mm; }
+.rep-fig .s { font-size: 8.5pt; color: #6A7176; margin-top: 1.5mm; line-height: 1.45; }
 
-/* ---- Tables ---- */
-.rep-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; margin-top: 2mm; }
+/* ---- Tables --------------------------------------------------------- */
+.rep-table { width: 100%; border-collapse: collapse; font-size: 8.5pt; }
 .rep-table th {
-  text-align: left; font-weight: 600; font-size: 7.5pt; letter-spacing: .06em;
-  text-transform: uppercase; color: #6A7176; padding: 0 3mm 2mm 0;
-  border-bottom: 1px solid #14181B; white-space: nowrap; background: none; position: static;
+  text-align: left; font-weight: 600; font-size: 7.5pt; letter-spacing: .07em;
+  text-transform: uppercase; color: #6A7176; padding: 0 4mm 2.5mm 0;
+  border-bottom: 1px solid #14181B; white-space: nowrap;
+  background: none; position: static;
 }
 .rep-table td {
-  padding: 1.8mm 3mm 1.8mm 0; border-bottom: .5px solid #EDEEEB;
-  vertical-align: top; font-variant-numeric: tabular-nums;
+  padding: 2.2mm 4mm 2.2mm 0; border-bottom: .5px solid #EDEEEB;
+  vertical-align: top; line-height: 1.45; font-variant-numeric: tabular-nums;
 }
 .rep-table tbody tr:nth-child(even) { background: #F5F7F1; }
 .rep-table .r { text-align: right; }
 .rep-table .pos { color: #2F6A4C; }
 .rep-table .neg { color: #A3182B; }
+.rep-table td:last-child, .rep-table th:last-child { padding-right: 0; }
 
-/* ---- Charts ---- */
-.rep-chart { margin: 3mm 0 2mm; }
+/* ---- Charts --------------------------------------------------------- */
+.rep-chart { margin: 4mm 0 2mm; }
 .rep-chart img { width: 100%; height: auto; display: block; }
 
-/* ---- Findings ---- */
-.rep-find { border-top: 1px solid #D5D8D3; padding: 3.5mm 0; break-inside: avoid; }
+/* ---- Findings ------------------------------------------------------- */
+.rep-find { border-top: .5px solid #DDE0DA; padding: 4mm 0; }
+.rep-find:last-child { border-bottom: .5px solid #DDE0DA; }
 .rep-find .v {
-  font-family: var(--display); font-size: 15pt; font-weight: 600;
-  letter-spacing: -.01em; font-variant-numeric: tabular-nums;
+  font-family: var(--display); font-size: 14pt; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.2;
 }
-.rep-find .l { font-size: 10pt; font-weight: 600; margin-top: 1mm; }
-.rep-find .b { font-size: 9pt; color: #6A7176; line-height: 1.6; margin-top: 1.5mm; }
-.rep-find .t { font-size: 8pt; font-weight: 600; color: #8A6D26; margin-top: 2mm; }
+.rep-find .l { font-size: 10pt; font-weight: 600; margin-top: 1.5mm; line-height: 1.4; }
+.rep-find .b { font-size: 8.5pt; color: #6A7176; line-height: 1.65; margin-top: 2mm; }
+.rep-find .t { font-size: 7.5pt; font-weight: 600; letter-spacing: .05em; color: #8A6D26; margin-top: 2.5mm; }
 
-/* ---- Running footer, repeated on every page ----
-   Chrome repeats a fixed element on each printed page and positions it
-   against the page content box. A negative offset tries to reach into the
-   page margin and is mispositioned instead, which lands the footer at the
-   top of the page over the content. Anchor it to the content edge and give
-   the page a deep enough bottom margin to sit in. */
-.rep-foot {
-  position: fixed; bottom: 0; left: 0; right: 0;
-  border-top: .5px solid #D5D8D3; padding-top: 2mm;
-  font-size: 7.5pt; color: #6A7176;
-  display: flex; justify-content: space-between; gap: 8mm;
-  background: #fff;
+/* ---- Closing note (printed once, at the end) ------------------------ */
+.rep-end {
+  margin-top: 10mm; border-top: .5px solid #DDE0DA; padding-top: 4mm;
+  font-size: 8pt; color: #6A7176; line-height: 1.6;
+  display: flex; justify-content: space-between; gap: 10mm;
 }
+
+.checklist { display: flex; flex-direction: column; gap: 9px; padding: 4px 0 2px; }
+.checklist label {
+  display: flex; align-items: center; gap: 10px; font-size: 13.5px;
+  cursor: pointer; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--ink);
+}
+.checklist input { accent-color: var(--scarlet); width: 15px; height: 15px; cursor: pointer; }
+
+.checklist.scrolly { max-height: 168px; overflow-y: auto; padding-right: 6px; }
+.checkbulk { display: flex; gap: 14px; margin-top: 9px; }
+.checkbulk button {
+  background: none; border: 0; padding: 0; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: var(--scarlet-d);
+}
+.checkbulk button:hover { color: var(--scarlet); text-decoration: underline; }
+#chartFarm { position: fixed; left: -12000px; top: 0; width: 820px; }
+.rep-part {
+  break-before: page; border-top: 2px solid #14181B; padding-top: 5mm; margin-bottom: 8mm;
+}
+.rep-part .eyebrow {
+  font-size: 7.5pt; font-weight: 600; letter-spacing: .12em;
+  text-transform: uppercase; color: #6A7176;
+}
+.rep-part h2 {
+  font-family: var(--display); font-size: 19pt; font-weight: 600;
+  line-height: 1.25; margin-top: 2mm; border: 0; padding: 0;
+}
+.rep-part .sub { font-size: 10pt; color: #3F464B; margin-top: 2mm; line-height: 1.5; }

@@ -412,19 +412,42 @@
 <div class="modal-veil" id="reportVeil" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="repTitle">
     <h2 id="repTitle">Export report</h2>
-    <p class="modal-lede">Builds a formatted document from what is on screen now, including the filters in force. In the print dialog that follows, choose <b>Save as PDF</b>, and switch <b>Headers and footers</b> on if you want page numbers.</p>
+    <p class="modal-lede">Builds a formatted document from the pages you choose, carrying the filters currently in force. Choose <b>Save as PDF</b> in the print dialog that follows.</p>
 
     <div class="field">
-      <label for="repScope">Include</label>
-      <select id="repScope">
-        <option value="page">This page only</option>
-        <option value="all">Every analysis page</option>
-      </select>
+      <label>Report type</label>
+      <div class="seg" id="repMode" style="width:100%">
+        <button data-mode="single" class="on" style="flex:1">Single report</button>
+        <button data-mode="pack" style="flex:1">Installation pack</button>
+      </div>
     </div>
 
-    <div class="field">
-      <label for="repFor">Prepared for</label>
-      <input type="text" id="repFor" value="MCCS Headquarters" maxlength="80">
+    <div id="repPackOpts" hidden>
+      <div class="field">
+        <label>Installations</label>
+        <div class="checklist scrolly" id="repInstalls"></div>
+        <div class="checkbulk">
+          <button type="button" id="repAllInst">Select all</button>
+          <button type="button" id="repNoInst">Clear</button>
+        </div>
+      </div>
+      <div class="field">
+        <label for="repDelivery">Deliver as</label>
+        <select id="repDelivery">
+          <option value="combined">One document, a part per installation</option>
+          <option value="separate">Separate files, one print dialog each</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="field" id="repPagesField">
+      <label>Pages to include</label>
+      <div class="checklist" id="repPages">
+        <label><input type="checkbox" value="sales" checked> Sales &amp; forecast</label>
+        <label><input type="checkbox" value="promo"> Promotion ROI</label>
+        <label><input type="checkbox" value="lob"> Lines of business</label>
+        <label><input type="checkbox" value="scenario"> Scenario</label>
+      </div>
     </div>
 
     <div class="field">
@@ -432,11 +455,14 @@
       <input type="text" id="repTitleIn" value="Revenue Intelligence Review" maxlength="80">
     </div>
 
-    <label class="toggle" style="margin-bottom:6px">
-      <input type="checkbox" id="repBrief" checked>
-      <span>Include a written executive summary</span>
-    </label>
-    <p class="hint" style="margin-top:0">Generated from the figures in the report. Adds a few seconds.</p>
+    <div class="field">
+      <label for="repFor">Prepared for</label>
+      <input type="text" id="repFor" value="MCCS Headquarters" maxlength="80">
+    </div>
+
+    <label class="toggle"><input type="checkbox" id="repBrief" checked>
+      <span>Include a written summary</span></label>
+    <p class="hint" style="margin-top:6px">Page numbers come from the print dialog: switch on Headers and footers if you want them.</p>
 
     <div class="modal-actions">
       <button class="btn quiet" id="repCancel">Cancel</button>
@@ -445,6 +471,7 @@
   </div>
 </div>
 
+<div id="chartFarm" aria-hidden="true"></div>
 <div id="report" aria-hidden="true"></div>
 
 

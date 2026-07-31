@@ -227,13 +227,34 @@ Admin tab, add each person with the **viewer** role. Viewers can explore everyth
 
 ## Reports
 
-**Export report** in the top bar builds a formatted document and hands it to the browser's print pipeline, where **Save as PDF** produces the file. Text stays as vectors, and no headless browser is needed on the server.
+**Export report** in the top bar builds a formatted document and hands it to the browser's print pipeline, where **Save as PDF** produces the file. Text stays as vectors and no headless browser is needed on the server.
 
-The report is assembled separately from the screen rather than printed from it, because printing a dashboard drags along the navigation, the controls and the clipped scroll regions. What you get instead is a cover carrying the title, who it was prepared for and by, the date, and the exact filters in force; an optional written summary; the sections you chose; and a method appendix stating how the forecast, promotion return and anomaly detection are calculated.
+Pick any combination of pages, or just the one you are on, which is what the dialog defaults to. Whatever you choose, the document follows the same shape:
 
-Charts are captured as images at three times screen resolution so they hold up in print. Table headers repeat across page breaks, and figures and findings are kept off page boundaries.
+```
+Cover        title, who it is for and by, date, and the filters in force
+Contents
+1  Summary   headline figures, a written assessment, and the findings
+2..n         one numbered section per page you selected
+n+1 Method   how the forecast, promotion return and anomaly scoring work
+```
 
-Chrome cannot number pages from CSS, so switch **Headers and footers** on in the print dialog if you want page numbers. A running footer carrying the report title and the synthetic-data notice appears on every page either way.
+### Installation packs
+
+Switch the export to **Installation pack** and it produces one part per installation instead of an enterprise roll-up. Each part carries that installation's own figures, its monthly performance and projection, its lines of business, its campaigns, and its own findings, so a part can be handed to an installation director on its own.
+
+Two delivery choices:
+
+- **One document, a part per installation.** A single print, a single PDF, each part starting on a fresh page. Best when the audience is headquarters.
+- **Separate files, one print dialog each.** The app builds and prints each installation in turn, setting the document title so the saved filenames are distinct. Best when the parts are being distributed.
+
+Charts for a pack cannot be captured from the screen, since the screen only shows one slice at a time. They are rendered off-canvas per installation and then captured, which is why a large pack takes a few seconds to assemble.
+
+The report is assembled separately from the screen rather than printed from it, because printing a dashboard drags along the navigation, the controls and the clipped scroll regions.
+
+Charts are captured at three times screen resolution so they hold up in print, table headers repeat across page breaks, and figures and findings are kept off page boundaries. Nothing uses `position: fixed`: Chrome repeats fixed elements on every printed page but positions them against the viewport, which drops a running footer straight onto the section headings.
+
+Chrome cannot number pages from CSS, so switch **Headers and footers** on in the print dialog if you want page numbers.
 
 ## Design
 

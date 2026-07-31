@@ -1100,14 +1100,13 @@ async function doLoadData(replace) {
 
 
 /* ---------------- Report export ----------------
-   Printing the dashboard itself gives a poor document: the rail, the controls
-   and the scroll regions all come along. So a separate document is assembled
-   from the same data, with a cover, the filters in force, and page breaks
-   chosen deliberately. The browser's own print pipeline turns it into a PDF,
-   which keeps the text as vectors and avoids a headless browser on the server.
+   Assembled as its own document rather than printed from the screen, because
+   printing the app drags along the rail, the controls and the clipped scroll
+   regions. Sections are numbered and listed in a contents page so the reader
+   can navigate it the way they would any other briefing document.
 */
 
-const REPORT_SECTIONS = {
+const REPORT_PAGES = {
   sales: 'Sales and forecast',
   promo: 'Promotion return on investment',
   lob: 'Lines of business',
@@ -1119,89 +1118,202 @@ function activeView() {
   return on ? on.dataset.v : 'sales';
 }
 
-/** Human-readable description of the filters, so scope is never ambiguous. */
+/* The section builders below read from a context rather than global state, so
+   the same code produces the enterprise report and each installation's part.
+   CTX is null for the enterprise report, which falls back to what is loaded. */
+let CTX = null;
+const ctx = () => CTX || {
+  label: null,
+  digest: S.analytics.digest,
+  months: S.analytics.months,
+  movers: S.analytics.movers,
+  campaigns: S.campaigns,
+  images: null
+};
+
 function filterScope() {
   const f = filters();
-  const parts = [];
-  parts.push(f.installation === 'all' ? 'All installations' : f.installation);
-  parts.push(f.businessLine === 'all' ? 'all lines of business' : f.businessLine);
   const months = S.analytics?.months || [];
   const from = f.from || months[0];
   const to = f.to || months[months.length - 1];
+  const parts = [
+    f.installation === 'all' ? 'All installations' : f.installation,
+    f.businessLine === 'all' ? 'all lines of business' : f.businessLine
+  ];
   if (from && to) parts.push(`${mlabel(from)} to ${mlabel(to)}`);
   return parts.join(', ');
 }
 
-/**
- * Chart.js renders to canvas, which prints unreliably, so take a raster.
- *
- * Captured at the screen's own pixel ratio a chart lands at roughly 100 DPI on
- * paper and looks soft. So the live chart is briefly re-rendered at a higher
- * ratio, captured, and put back. The swap is invisible because the print
- * dialog does not open until every capture has finished.
- */
 function chartPng(id, scale = 3) {
   const c = S.charts[id];
   if (!c) return null;
-
-  // Plain capture first, so there is always something to fall back to.
   let plain = null;
   try { plain = c.toBase64Image('image/png', 1); } catch { return null; }
-
   const previous = c.options.devicePixelRatio;
   let hi = null;
   try {
     c.options.devicePixelRatio = scale;
     c.options.animation = false;
-    c.resize();
-    c.update('none');
+    c.resize(); c.update('none');
     hi = c.toBase64Image('image/png', 1);
-  } catch {
-    hi = null;
-  } finally {
+  } catch { hi = null; }
+  finally {
     c.options.devicePixelRatio = previous;
-    try { c.resize(); c.update('none'); } catch { /* chart already disposed */ }
+    try { c.resize(); c.update('none'); } catch { /* disposed */ }
   }
-
-  // Only prefer the upscaled capture if it actually came back larger.
   return (hi && plain && hi.length > plain.length) ? hi : plain;
 }
 
-const repChart = (id, caption) => {
-  const src = chartPng(id);
-  if (!src) return '';
-  return `<div class="rep-chart"><img src="${src}" alt="${esc(caption || '')}"></div>`;
+const repChart = (id, alt) => {
+  const c = ctx();
+  const src = (c.images && c.images[id]) || (c.images ? null : chartPng(id));
+  return src ? `<div class="rep-chart"><img src="${src}" alt="${esc(alt || '')}"></div>` : '';
 };
+
+/**
+ * Render a chart away from the screen so a report can contain a chart for a
+ * slice of data that is not currently displayed. Chart.js sizes itself from
+ * layout, so the host is pushed off-canvas rather than hidden.
+ */
+function offscreenChart(config, w = 780, h = 300, scale = 3) {
+  const farm = $('chartFarm');
+  const box = document.createElement('div');
+  box.style.cssText = `width:${w}px;height:${h}px`;
+  const canvas = document.createElement('canvas');
+  box.appendChild(canvas);
+  farm.appendChild(box);
+
+  let png = null;
+  let chart = null;
+  try {
+    config.options = {
+      ...(config.options || {}),
+      responsive: true, maintainAspectRatio: false,
+      animation: false, devicePixelRatio: scale
+    };
+    config.options.plugins = { ...(config.options.plugins || {}), legend: { display: false } };
+    chart = new Chart(canvas.getContext('2d'), config);
+    png = chart.toBase64Image('image/png', 1);
+  } catch (e) {
+    console.warn('offscreen chart failed:', e.message);
+  } finally {
+    if (chart) chart.destroy();
+    box.remove();
+  }
+  return png;
+}
+
+/** Revenue actuals with the projection appended, for one slice of the data. */
+function cfgRevenue(analytics) {
+  const actual = analytics.series.revenue;
+  const fc = analytics.forecast.periods || [];
+  const labels = [...analytics.months.map(mlabel), ...fc.map((p) => mlabel(p.period))];
+  const pad = new Array(analytics.months.length - 1).fill(null);
+  return {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        { label: 'Actual', data: [...actual], borderColor: PALETTE.scarlet,
+          backgroundColor: PALETTE.scarletFill, borderWidth: 1.75, pointRadius: 0, tension: .2, fill: true },
+        { label: 'Forecast', data: [...pad, actual[actual.length - 1], ...fc.map((p) => p.value)],
+          borderColor: PALETTE.slate, borderWidth: 1.75, borderDash: [4, 3], pointRadius: 0, tension: .2 }
+      ]
+    },
+    options: {
+      scales: {
+        x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkipPadding: 18 } },
+        y: { grid: { color: PALETTE.grid }, ticks: { callback: (v) => money(v), padding: 8 } }
+      }
+    }
+  };
+}
+
+/** Revenue by line of business, for one slice of the data. */
+function cfgLines(digest) {
+  const p = digest.linesOfBusiness;
+  return {
+    type: 'bar',
+    data: {
+      labels: p.map((x) => x.businessLine),
+      datasets: [{ data: p.map((x) => x.revenue), backgroundColor: 'rgba(163,24,43,.62)', borderRadius: 1 }]
+    },
+    options: {
+      scales: {
+        x: { grid: { display: false } },
+        y: { grid: { color: PALETTE.grid }, ticks: { callback: (v) => money(v), padding: 8 } }
+      }
+    }
+  };
+}
+
+/** Fetch one installation's slice and pre-render its charts. */
+async function installationContext(name) {
+  const q = new URLSearchParams(
+    Object.entries({ ...filters(), installation: name }).filter(([, v]) => v != null && v !== '')
+  ).toString();
+  const [analytics, camps] = await Promise.all([
+    api(`/api/analytics?${q}`),
+    api(`/api/campaigns?${q}`)
+  ]);
+  if (analytics.empty) return null;
+  return {
+    label: name,
+    digest: analytics.digest,
+    months: analytics.months,
+    movers: analytics.movers,
+    campaigns: camps.campaigns,
+    images: {
+      chartMain: offscreenChart(cfgRevenue(analytics), 780, 300),
+      chartLob: offscreenChart(cfgLines(analytics.digest), 780, 260)
+    }
+  };
+}
 
 const repTable = (headers, rows) => `
   <table class="rep-table">
-    <thead><tr>${headers.map((h) => `<th class="${h.r ? 'r' : ''}">${esc(h.t ?? h)}</th>`).join('')}</tr></thead>
+    <thead><tr>${headers.map((h) => {
+      const c = (h && typeof h === 'object') ? h : { t: h };
+      return `<th class="${c.r ? 'r' : ''}">${esc(c.t)}</th>`;
+    }).join('')}</tr></thead>
     <tbody>${rows.map((r) => `<tr>${r.map((c) => {
       const cell = (c && typeof c === 'object') ? c : { t: c };
-      return `<td class="${cell.r ? 'r' : ''} ${cell.cls || ''}">${cell.html || esc(cell.t ?? '')}</td>`;
+      return `<td class="${cell.r ? 'r' : ''} ${cell.cls || ''}">${esc(cell.t ?? '')}</td>`;
     }).join('')}</tr>`).join('')}</tbody>
   </table>`;
 
-function repFigures() {
-  const d = S.analytics.digest;
+const repBlock = (title, body, note) => `
+  <div class="rep-block">
+    ${title ? `<h3>${esc(title)}</h3>` : ''}
+    ${body}
+    ${note ? `<div class="rep-note">${esc(note)}</div>` : ''}
+  </div>`;
+
+const repSection = (n, title, body) => `
+  <section class="rep-sec">
+    <h2><span class="n">${n}</span><span>${esc(title)}</span></h2>
+    ${body}
+  </section>`;
+
+/* ---- Section 1: summary, always present ---- */
+function secSummary(n, summaryText) {
+  const d = ctx().digest;
   const h = d.headline;
-  const f = [
+  const figs = [
     ['Revenue, ' + mlabel(d.coverage.latestPeriod), money(h.latestRevenue), pct(h.momPct) + ' on the month'],
     ['Year on year', pct(h.yoyPct), 'against the same month last year'],
-    ['Gross margin rate', `${h.latestMarginRatePct}%`, money(h.totalMargin) + ' to date'],
+    ['Gross margin rate', `${h.latestMarginRatePct}%`, money(h.totalMargin) + ' of margin to date'],
     ['Average transaction', `$${h.avgTransactionValue}`, num(h.latestTransactions) + ' transactions'],
     ['Next three months', money(d.forecast.total), `${d.forecast.mapePct}% in-sample error`],
-    ['Campaigns earning', `${d.campaigns.profitable} of ${d.campaigns.total}`, money(d.campaigns.spendInNegativeRoi) + ' not returning']
+    ['Campaigns earning', `${d.campaigns.profitable} of ${d.campaigns.total}`, money(d.campaigns.spendInNegativeRoi) + ' not returning cost']
   ];
-  return `<div class="rep-figs">${f.map(([l, v, sfx]) => `
-    <div class="rep-fig"><div class="l">${esc(l)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sfx)}</div></div>`).join('')}</div>`;
-}
 
-function repFindings() {
-  const d = S.analytics.digest;
-  return `
-    <div class="rep-card">
-      <h3>Findings</h3>
+  const figsHtml = `<div class="rep-figs">${figs.map(([l, v, sfx]) => `
+    <div class="rep-fig"><div class="l">${esc(l)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sfx)}</div></div>`).join('')}</div>`;
+
+  const findings = `
+    <div class="rep-block">
+      <h3>Where the money is</h3>
       ${d.opportunities.items.map((o) => `
         <div class="rep-find">
           <div class="v">${money(o.value)}</div>
@@ -1209,288 +1321,407 @@ function repFindings() {
           <div class="b">${esc(o.basis)}</div>
           <div class="t">${esc(o.loe)}</div>
         </div>`).join('')}
+      <div class="rep-note">Figures are not additive: the first two describe the same pool of promotional spend seen two ways.</div>
     </div>`;
+
+  return repSection(n, 'Summary',
+    figsHtml +
+    (summaryText ? repBlock('Assessment', `<div class="rep-prose">${esc(summaryText)}</div>`,
+      'Written from the computed figures in this report.') : '') +
+    findings);
 }
 
-function repSales() {
-  const d = S.analytics.digest;
-  const movers = S.analytics.movers.slice(0, 8);
-  return `
-    <section class="rep-section">
-      <h2>Sales and forecast</h2>
-      ${repFigures()}
-      <div class="rep-card">
-        <h3>Monthly performance</h3>
-        ${repChart('chartMain', 'Monthly revenue with a three month projection')}
-        <div class="rep-note">Actuals with a three month projection and an 80% interval. Projection totals ${money(d.forecast.total)} with ${d.forecast.mapePct}% in-sample error.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Installation performance</h3>
-        ${repTable(
-          ['Installation', { t: 'Revenue', r: 1 }, { t: 'Margin', r: 1 }, { t: 'Margin rate', r: 1 }, { t: 'Growth', r: 1 }],
-          d.installations.map((i) => [
-            i.installation, { t: money(i.revenue), r: 1 }, { t: money(i.margin), r: 1 },
-            { t: i.marginRatePct + '%', r: 1 },
-            { t: pct(i.growthPct), r: 1, cls: i.growthPct >= 0 ? 'pos' : 'neg' }
-          ]))}
-        <div class="rep-note">Growth compares the recent half of the period with the earlier half.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Movement by category, latest month against prior</h3>
-        ${repTable(
-          ['Category', { t: 'Prior', r: 1 }, { t: 'Latest', r: 1 }, { t: 'Change', r: 1 }],
-          movers.map((m) => [
-            m.label, { t: money(m.before), r: 1 }, { t: money(m.after), r: 1 },
-            { t: pct(m.changePct), r: 1, cls: m.changePct >= 0 ? 'pos' : 'neg' }
-          ]))}
-      </div>
-      ${repFindings()}
-    </section>`;
+/* ---- Analysis sections ---- */
+function secSales(n) {
+  const d = ctx().digest;
+  const movers = ctx().movers;
+  return repSection(n, 'Sales and forecast',
+    `<p class="rep-lead">Revenue reached ${money(d.headline.latestRevenue)} in ${mlabel(d.coverage.latestPeriod)}, ${pct(d.headline.momPct)} on the month. The projection below covers the following three months.</p>` +
+    repBlock('Monthly performance', repChart('chartMain', 'Monthly revenue with a three month projection'),
+      `Actuals with a three month projection and an 80% interval. The projection totals ${money(d.forecast.total)}.`) +
+    repBlock('Installations, ranked by growth', repTable(
+      ['Installation', { t: 'Revenue', r: 1 }, { t: 'Margin', r: 1 }, { t: 'Margin rate', r: 1 }, { t: 'Growth', r: 1 }],
+      d.installations.map((i) => [
+        i.installation, { t: money(i.revenue), r: 1 }, { t: money(i.margin), r: 1 },
+        { t: i.marginRatePct + '%', r: 1 },
+        { t: pct(i.growthPct), r: 1, cls: i.growthPct >= 0 ? 'pos' : 'neg' }])),
+      'Growth compares the recent half of the period with the earlier half.') +
+    repBlock('Largest movements by category', repTable(
+      ['Category', { t: 'Prior month', r: 1 }, { t: 'Latest month', r: 1 }, { t: 'Change', r: 1 }],
+      movers.slice(0, 6).concat(movers.slice(-4)).map((m) => [
+        m.label, { t: money(m.before), r: 1 }, { t: money(m.after), r: 1 },
+        { t: pct(m.changePct), r: 1, cls: m.changePct >= 0 ? 'pos' : 'neg' }])),
+      'The six largest increases and four largest decreases.'));
 }
 
-function repPromo() {
-  const cs = visibleCampaigns();
+function secPromo(n) {
+  const cs = CTX ? CTX.campaigns : visibleCampaigns();
   const spend = cs.reduce((a, c) => a + c.spend, 0);
   const net = cs.reduce((a, c) => a + c.netMargin, 0);
-  const sorted = [...cs].sort((a, b) => b.roiPct - a.roiPct);
+  const losing = cs.filter((c) => !c.profitable).sort((a, b) => a.roiPct - b.roiPct);
+  const best = [...cs].sort((a, b) => b.roiPct - a.roiPct).slice(0, 10);
   const f = S.promoFilter;
   const applied = [
     f.channel !== 'all' ? `channel ${f.channel}` : null,
-    f.bl !== 'all' ? `line ${f.bl}` : null,
+    f.bl !== 'all' ? `line of business ${f.bl}` : null,
     f.inst !== 'all' ? `installation ${f.inst}` : null,
     f.result !== 'all' ? (f.result === 'win' ? 'earning campaigns only' : 'losing campaigns only') : null
   ].filter(Boolean);
 
-  return `
-    <section class="rep-section">
-      <h2>Promotion return on investment</h2>
-      <div class="rep-card">
-        <div class="rep-note">${cs.length} of ${S.campaigns.length} campaigns, ${money(spend)} of spend, net ${money(net)}.${
-          applied.length ? ' Filtered to ' + esc(applied.join(', ')) + '.' : ''}</div>
-      </div>
-      <div class="rep-card">
-        <h3>Spend against return</h3>
-        ${repChart('chartScatter', 'Campaign spend against return on investment')}
-        <div class="rep-note">Each point is a campaign. Points below zero did not return their cost.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Channel economics</h3>
-        ${repChart('chartChannels', 'Return on investment by channel')}
-      </div>
-      <div class="rep-card">
-        <h3>Campaigns</h3>
-        ${repTable(
-          ['Campaign', 'Channel', 'Installation', { t: 'Spend', r: 1 }, { t: 'Lift', r: 1 }, { t: 'Incr. margin', r: 1 }, { t: 'ROI', r: 1 }],
-          sorted.map((c) => [
-            c.name, c.channel, c.installation,
-            { t: money(c.spend), r: 1 }, { t: pct(c.liftPct), r: 1 },
-            { t: money(c.incrementalMargin), r: 1 },
-            { t: pct(c.roiPct), r: 1, cls: c.profitable ? 'pos' : 'neg' }
-          ]))}
-      </div>
-    </section>`;
+  return repSection(n, 'Promotion return on investment',
+    `<p class="rep-lead">${cs.length} of ${CTX ? cs.length : S.campaigns.length} campaigns are in scope, carrying ${money(spend)} of spend and returning ${money(net)} net.${
+      applied.length ? ' Filtered to ' + esc(applied.join(', ')) + '.' : ''} Return is incremental margin less spend, over spend, so zero is break-even.</p>` +
+    repBlock('Spend against return', repChart('chartScatter', 'Campaign spend against return'),
+      'Each point is a campaign. Anything below zero did not return its cost.') +
+    repBlock('Channel economics', repChart('chartChannels', 'Return by channel')) +
+    (losing.length ? repBlock('Campaigns not returning their cost', repTable(
+      ['Campaign', 'Channel', 'Installation', { t: 'Spend', r: 1 }, { t: 'Incr. margin', r: 1 }, { t: 'ROI', r: 1 }],
+      losing.map((c) => [c.name, c.channel, c.installation,
+        { t: money(c.spend), r: 1 }, { t: money(c.incrementalMargin), r: 1 },
+        { t: pct(c.roiPct), r: 1, cls: 'neg' }])),
+      `${losing.length} campaigns, ${money(losing.reduce((a, c) => a + c.spend, 0))} of spend. This is the first place to look for recoverable money.`) : '') +
+    repBlock('Ten strongest campaigns', repTable(
+      ['Campaign', 'Channel', { t: 'Spend', r: 1 }, { t: 'Lift', r: 1 }, { t: 'ROI', r: 1 }],
+      best.map((c) => [c.name, c.channel, { t: money(c.spend), r: 1 },
+        { t: pct(c.liftPct), r: 1 }, { t: pct(c.roiPct), r: 1, cls: 'pos' }]))));
 }
 
-function repLob() {
-  const d = S.analytics.digest;
-  return `
-    <section class="rep-section">
-      <h2>Lines of business</h2>
-      <div class="rep-card">
-        ${repTable(
-          ['Line of business', { t: 'Revenue', r: 1 }, { t: 'Margin rate', r: 1 }, { t: 'Trend', r: 1 },
-           { t: 'Avg transaction', r: 1 }, { t: 'Stock cover', r: 1 }, { t: 'Promotion ROI', r: 1 }, 'Recommendation'],
-          d.linesOfBusiness.map((x) => [
-            x.businessLine, { t: money(x.revenue), r: 1 }, { t: x.marginRatePct + '%', r: 1 },
-            { t: pct(x.trendPct), r: 1, cls: x.trendPct >= 0 ? 'pos' : 'neg' },
-            { t: '$' + x.avgTransactionValue, r: 1 },
-            { t: x.daysOfSupply == null ? 'no stock' : x.daysOfSupply + ' days', r: 1 },
-            { t: x.promoRoiPct == null ? '-' : pct(x.promoRoiPct), r: 1 },
-            x.recommendation
-          ]))}
-        <div class="rep-note">Scale when the trend exceeds 6% and margin rate exceeds 25%. Review when the trend is negative or margin rate falls below 15%. Stock cover is the days of selling that stock on hand would cover, and applies only to lines holding physical stock.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Revenue by line of business</h3>
-        ${repChart('chartLob', 'Revenue by line of business')}
-      </div>
-      ${d.anomalies.length ? `
-      <div class="rep-card">
-        <h3>Unusual movements</h3>
-        ${repTable(
-          ['Period', 'Installation', 'Line of business', { t: 'Reported', r: 1 }, { t: 'Seasonally adjusted', r: 1 }, { t: 'Z score', r: 1 }],
-          d.anomalies.slice(0, 12).map((a) => [
-            mlabel(a.period), a.installation, a.businessLine,
-            { t: pct(a.changePct), r: 1, cls: a.changePct >= 0 ? 'pos' : 'neg' },
-            { t: pct(a.adjustedChangePct), r: 1, cls: a.adjustedChangePct >= 0 ? 'pos' : 'neg' },
-            { t: a.zScore, r: 1 }
-          ]))}
-        <div class="rep-note">Movements beyond two standard deviations once the seasonal pattern is removed, so a normal post-holiday fall is not reported as an exception.</div>
-      </div>` : ''}
-    </section>`;
+function secLob(n) {
+  const d = ctx().digest;
+  return repSection(n, 'Lines of business',
+    `<p class="rep-lead">Each line is assessed on margin rate, direction of travel, and the return on its promotional spend. The recommendation is a rule applied to those inputs, all of which appear in the row, so it can be challenged rather than taken on trust.</p>` +
+    repBlock('Portfolio', repTable(
+      ['Line of business', { t: 'Revenue', r: 1 }, { t: 'Margin rate', r: 1 }, { t: 'Trend', r: 1 },
+       { t: 'Avg transaction', r: 1 }, { t: 'Stock cover', r: 1 }, { t: 'Promotion ROI', r: 1 }, 'Recommendation'],
+      d.linesOfBusiness.map((x) => [
+        x.businessLine, { t: money(x.revenue), r: 1 }, { t: x.marginRatePct + '%', r: 1 },
+        { t: pct(x.trendPct), r: 1, cls: x.trendPct >= 0 ? 'pos' : 'neg' },
+        { t: '$' + x.avgTransactionValue, r: 1 },
+        { t: x.daysOfSupply == null ? 'no stock' : x.daysOfSupply + ' days', r: 1 },
+        { t: x.promoRoiPct == null ? '-' : pct(x.promoRoiPct), r: 1 },
+        x.recommendation])),
+      'Scale where the trend exceeds 6% and margin rate exceeds 25%. Review where the trend is negative or margin rate falls below 15%. Stock cover is the days of selling that stock on hand would cover, and applies only to lines holding physical stock.') +
+    repBlock('Revenue by line of business', repChart('chartLob', 'Revenue by line of business')) +
+    (d.anomalies.length ? repBlock('Unusual movements', repTable(
+      ['Period', 'Installation', 'Line of business', { t: 'Reported', r: 1 }, { t: 'Adjusted', r: 1 }, { t: 'Z score', r: 1 }],
+      d.anomalies.slice(0, 10).map((a) => [
+        mlabel(a.period), a.installation, a.businessLine,
+        { t: pct(a.changePct), r: 1, cls: a.changePct >= 0 ? 'pos' : 'neg' },
+        { t: pct(a.adjustedChangePct), r: 1, cls: a.adjustedChangePct >= 0 ? 'pos' : 'neg' },
+        { t: String(a.zScore), r: 1 }])),
+      'Reported is the raw month on month change. Adjusted removes the seasonal pattern, so a normal post-holiday fall is not reported as an exception. A line can fall in reported terms yet still beat its own seasonal expectation.') : ''));
 }
 
-function repScenario() {
+function secScenario(n) {
   const r = S.scenario;
-  if (!r) return '';
-  return `
-    <section class="rep-section">
-      <h2>Scenario</h2>
-      <div class="rep-card">
-        <h3>Levers applied</h3>
-        ${repTable(['Lever', { t: 'Setting', r: 1 }], [
-          ['Patron demand', { t: r.params.demandShiftPct ? pct(r.params.demandShiftPct, 0) : 'no change', r: 1 }],
-          ['Promotion budget', { t: r.params.promoBudgetChangePct ? pct(r.params.promoBudgetChangePct, 0) : 'no change', r: 1 }],
-          ['Gross margin rate', { t: r.params.marginRateDeltaPts ? `${r.params.marginRateDeltaPts > 0 ? '+' : ''}${r.params.marginRateDeltaPts} points` : 'no change', r: 1 }],
-          ['Reallocate losing spend', { t: r.params.reallocateLosingSpend ? 'yes' : 'no', r: 1 }]
-        ])}
-      </div>
-      <div class="rep-card">
-        <h3>Result over ${r.horizonMonths} months</h3>
-        ${repTable(['Measure', { t: 'No change', r: 1 }, { t: 'Scenario', r: 1 }, { t: 'Difference', r: 1 }], [
-          ['Revenue', { t: money(r.baseline.revenue), r: 1 }, { t: money(r.projected.revenue), r: 1 },
-            { t: money(r.delta.revenue), r: 1, cls: r.delta.revenue >= 0 ? 'pos' : 'neg' }],
-          ['Margin', { t: money(r.baseline.margin), r: 1 }, { t: money(r.projected.margin), r: 1 },
-            { t: money(r.delta.margin), r: 1, cls: r.delta.margin >= 0 ? 'pos' : 'neg' }],
-          ['Margin rate', { t: r.baseline.marginRatePct + '%', r: 1 }, { t: r.projected.marginRatePct + '%', r: 1 }, { t: '', r: 1 }]
-        ])}
-      </div>
-      ${r.steps.length ? `
-      <div class="rep-card">
-        <h3>Where the change comes from</h3>
-        ${repTable(['Effect', { t: 'Margin', r: 1 }, 'Basis'],
-          r.steps.map((st) => [st.label, { t: money(st.margin), r: 1, cls: st.margin >= 0 ? 'pos' : 'neg' }, st.basis]))}
-      </div>` : ''}
-      <div class="rep-card">
-        <h3>Assumptions</h3>
-        <div class="rep-note">${r.assumptions.map(esc).join(' ')}</div>
-      </div>
-    </section>`;
+  if (!r) {
+    return repSection(n, 'Scenario', repBlock(null,
+      '<p class="rep-lead">No scenario was run. Set the levers on the Scenario page and export again to include one.</p>'));
+  }
+  const lever = (label, value) => [label, { t: value, r: 1 }];
+  return repSection(n, 'Scenario',
+    `<p class="rep-lead">A projection of the next ${r.horizonMonths} months under the changes below, against the same period with no change. Demand and promotion budget both move revenue, so both feed one projection.</p>` +
+    repBlock('Levers applied', repTable(['Lever', { t: 'Setting', r: 1 }], [
+      lever('Patron demand', r.params.demandShiftPct ? pct(r.params.demandShiftPct, 0) : 'no change'),
+      lever('Promotion budget', r.params.promoBudgetChangePct ? pct(r.params.promoBudgetChangePct, 0) : 'no change'),
+      lever('Gross margin rate', r.params.marginRateDeltaPts ? `${r.params.marginRateDeltaPts > 0 ? '+' : ''}${r.params.marginRateDeltaPts} points` : 'no change'),
+      lever('Reallocate losing spend', r.params.reallocateLosingSpend ? 'yes' : 'no')
+    ])) +
+    repBlock('Result', repTable(
+      ['Measure', { t: 'No change', r: 1 }, { t: 'Scenario', r: 1 }, { t: 'Difference', r: 1 }], [
+      ['Revenue', { t: money(r.baseline.revenue), r: 1 }, { t: money(r.projected.revenue), r: 1 },
+        { t: money(r.delta.revenue), r: 1, cls: r.delta.revenue >= 0 ? 'pos' : 'neg' }],
+      ['Margin', { t: money(r.baseline.margin), r: 1 }, { t: money(r.projected.margin), r: 1 },
+        { t: money(r.delta.margin), r: 1, cls: r.delta.margin >= 0 ? 'pos' : 'neg' }],
+      ['Margin rate', { t: r.baseline.marginRatePct + '%', r: 1 }, { t: r.projected.marginRatePct + '%', r: 1 }, { t: '', r: 1 }]
+    ])) +
+    (r.steps.length ? repBlock('Where the change comes from', repTable(
+      ['Effect', { t: 'Margin', r: 1 }, 'Basis'],
+      r.steps.map((st) => [st.label,
+        { t: money(st.margin), r: 1, cls: st.margin >= 0 ? 'pos' : 'neg' }, st.basis])),
+      'The effects sum to the total difference above.') : '') +
+    repBlock('Assumptions', `<div class="rep-note" style="margin-top:0">${esc(r.assumptions.join(' '))}</div>`));
 }
 
-const REP_BUILDERS = { sales: repSales, promo: repPromo, lob: repLob, scenario: repScenario };
+const SECTION_FN = { sales: secSales, promo: secPromo, lob: secLob, scenario: secScenario };
 
-function repCover(opts, sections) {
+function secMethod(n) {
   const d = S.analytics.digest;
-  const now = new Date();
-  const stamp = now.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return repSection(n, 'Method',
+    repBlock('Forecast',
+      `<div class="rep-note" style="margin-top:0">A seasonal index is estimated from the monthly history and applied to a linear trend fitted to the deseasonalised series. The interval covers 80% and comes from the spread of in-sample residuals. Reported error is mean absolute percentage error measured in sample, currently ${d.forecast.mapePct}%, which will understate error on months the model has not seen.</div>`) +
+    repBlock('Promotion return',
+      '<div class="rep-note" style="margin-top:0">Incremental revenue is promotional period sales less the baseline period. Incremental margin applies the margin rate recorded against that campaign. Return is incremental margin less spend, over spend, so zero is break-even rather than a target.</div>') +
+    repBlock('Unusual movements',
+      '<div class="rep-note" style="margin-top:0">Each installation and line of business series is divided by the enterprise seasonal index before month on month changes are scored, so a routine post-holiday fall is not reported as an exception. Movements beyond two standard deviations of that series own history are listed.</div>') +
+    repBlock('Figures',
+      '<div class="rep-note" style="margin-top:0">Gross margin is always revenue less cost of goods and is never stored independently. Stock cover and stock turns apply only to lines carrying physical stock. All narrative in this document is written from the computed figures; nothing in it is generated independently of the data.</div>'));
+}
+
+/** One installation's part within a pack. */
+function partInstallation(part, c) {
+  CTX = c;
+  const d = c.digest;
+  const h = d.headline;
+  const worst = [...c.campaigns].sort((a, b) => a.roiPct - b.roiPct);
+  const losing = worst.filter((x) => !x.profitable);
+
+  const figs = [
+    ['Revenue, ' + mlabel(d.coverage.latestPeriod), money(h.latestRevenue), pct(h.momPct) + ' on the month'],
+    ['Year on year', pct(h.yoyPct), 'against the same month last year'],
+    ['Gross margin rate', `${h.latestMarginRatePct}%`, money(h.totalMargin) + ' of margin to date'],
+    ['Average transaction', `$${h.avgTransactionValue}`, num(h.latestTransactions) + ' transactions'],
+    ['Next three months', money(d.forecast.total), `${d.forecast.mapePct}% in-sample error`],
+    ['Campaigns earning', `${d.campaigns.profitable} of ${d.campaigns.total}`,
+      money(d.campaigns.spendInNegativeRoi) + ' not returning cost']
+  ];
+
+  return `
+    <div class="rep-part">
+      <div class="eyebrow">Part ${part}</div>
+      <h2>${esc(c.label)}</h2>
+      <p class="sub">${money(d.headline.totalRevenue)} of revenue over ${d.coverage.months} months across ${d.coverage.businessLines} lines of business.</p>
+    </div>
+    <div class="rep-figs">${figs.map(([l, v, sfx]) => `
+      <div class="rep-fig"><div class="l">${esc(l)}</div><div class="v">${esc(v)}</div><div class="s">${esc(sfx)}</div></div>`).join('')}</div>
+    ${repBlock('Monthly performance', repChart('chartMain', `Revenue at ${c.label}`),
+      `Actuals with a three month projection totalling ${money(d.forecast.total)}.`)}
+    ${repBlock('Lines of business', repTable(
+      ['Line of business', { t: 'Revenue', r: 1 }, { t: 'Margin rate', r: 1 }, { t: 'Trend', r: 1 },
+       { t: 'Avg transaction', r: 1 }, 'Recommendation'],
+      d.linesOfBusiness.map((x) => [
+        x.businessLine, { t: money(x.revenue), r: 1 }, { t: x.marginRatePct + '%', r: 1 },
+        { t: pct(x.trendPct), r: 1, cls: x.trendPct >= 0 ? 'pos' : 'neg' },
+        { t: '$' + x.avgTransactionValue, r: 1 }, x.recommendation])))}
+    ${repBlock('Revenue by line of business', repChart('chartLob', `Revenue by line of business at ${c.label}`))}
+    ${c.campaigns.length ? repBlock('Campaigns', repTable(
+      ['Campaign', 'Channel', { t: 'Spend', r: 1 }, { t: 'Lift', r: 1 }, { t: 'ROI', r: 1 }],
+      worst.map((x) => [x.name, x.channel, { t: money(x.spend), r: 1 },
+        { t: pct(x.liftPct), r: 1 },
+        { t: pct(x.roiPct), r: 1, cls: x.profitable ? 'pos' : 'neg' }])),
+      losing.length
+        ? `${losing.length} of ${c.campaigns.length} campaigns did not return their cost, carrying ${money(losing.reduce((a, x) => a + x.spend, 0))} of spend.`
+        : 'Every campaign in scope returned its cost.') : ''}
+    ${repBlock('Where the money is', d.opportunities.items.map((o) => `
+      <div class="rep-find">
+        <div class="v">${money(o.value)}</div>
+        <div class="l">${esc(o.label)}</div>
+        <div class="b">${esc(o.basis)}</div>
+      </div>`).join(''))}`;
+}
+
+function repPackCover(opts, names) {
+  const stamp = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   return `
     <div class="rep-cover">
       <img src="/logo-dark.png" alt="Dexian Government Solutions">
-      <hr class="rep-rule">
+      <hr class="rule">
+      <div class="rep-kicker">Revenue Intelligence &middot; Installation pack</div>
+      <h1>${esc(opts.title)}</h1>
+      <p class="rep-sub">One part per installation. Each part covers only that installation's own performance, so it can be read or distributed on its own.</p>
+      <table class="rep-meta">
+        <tr><th>Prepared for</th><td>${esc(opts.preparedFor)}</td></tr>
+        <tr><th>Prepared by</th><td>${esc(S.user.name)}, Dexian Government Solutions</td></tr>
+        <tr><th>Date</th><td>${esc(stamp)}</td></tr>
+        <tr><th>Installations</th><td>${esc(names.join(', '))}</td></tr>
+        <tr><th>Period</th><td>${esc(filterScope().split(', ').pop())}</td></tr>
+      </table>
+      <div class="rep-notice">
+        <b>Prototype on synthetic data.</b> Figures are computed from a representative dataset, not from MCCS systems of record.
+      </div>
+    </div>`;
+}
+
+function repCover(opts, titles) {
+  const d = S.analytics.digest;
+  const stamp = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+  return `
+    <div class="rep-cover">
+      <img src="/logo-dark.png" alt="Dexian Government Solutions">
+      <hr class="rule">
       <div class="rep-kicker">Revenue Intelligence</div>
       <h1>${esc(opts.title)}</h1>
-      <p class="rep-sub">${esc(sections.map((k) => REPORT_SECTIONS[k]).join(' \u00b7 '))}</p>
-
+      <p class="rep-sub">${esc(titles.join('. '))}.</p>
       <table class="rep-meta">
         <tr><th>Prepared for</th><td>${esc(opts.preparedFor)}</td></tr>
         <tr><th>Prepared by</th><td>${esc(S.user.name)}, Dexian Government Solutions</td></tr>
         <tr><th>Date</th><td>${esc(stamp)}</td></tr>
         <tr><th>Scope</th><td>${esc(filterScope())}</td></tr>
-        <tr><th>Records</th><td>${num(d.coverage.salesRows)} monthly sales records across ${d.coverage.installations} installations and ${d.coverage.businessLines} lines of business, with ${d.coverage.campaigns} campaigns</td></tr>
+        <tr><th>Basis</th><td>${num(d.coverage.salesRows)} monthly sales records across ${d.coverage.installations} installations and ${d.coverage.businessLines} lines of business, with ${d.coverage.campaigns} campaigns</td></tr>
       </table>
-
       <div class="rep-notice">
-        <b>Prototype on synthetic data.</b> The figures in this document are computed from a representative dataset, not from MCCS systems of record. Structures and relationships mirror the real environment so that methods can be assessed, but no value should be treated as an operational fact.
+        <b>Prototype on synthetic data.</b> Figures are computed from a representative dataset, not from MCCS systems of record. Structures and relationships mirror the real environment so the methods can be assessed, but no value here should be treated as an operational fact.
       </div>
     </div>`;
 }
 
-function repMethod() {
-  const d = S.analytics.digest;
-  return `
-    <section class="rep-section">
-      <h2>Method</h2>
-      <div class="rep-card">
-        <h3>Forecast</h3>
-        <div class="rep-note">A seasonal index is estimated from the monthly history and applied to a linear trend fitted to the deseasonalised series. The interval shown covers 80% and is derived from the spread of in-sample residuals. Reported error is mean absolute percentage error measured in sample, currently ${d.forecast.mapePct}%, which will understate error on unseen months.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Promotion return</h3>
-        <div class="rep-note">Incremental revenue is promotional period sales less the baseline period. Incremental margin applies the margin rate recorded for that campaign. Return on investment is incremental margin less spend, over spend, so zero is break-even rather than a target.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Unusual movements</h3>
-        <div class="rep-note">Each installation and line of business series is divided by the enterprise seasonal index before month on month changes are scored, so that a routine post-holiday fall is not reported as an exception. Movements beyond two standard deviations of that series' own history are listed.</div>
-      </div>
-      <div class="rep-card">
-        <h3>Figures</h3>
-        <div class="rep-note">Gross margin is always revenue less cost of goods and is never stored independently. Stock cover and stock turns apply only to lines carrying physical stock. All narrative text in this document is written from these computed figures; no value in it is generated independently of the data.</div>
-      </div>
-    </section>`;
-}
+const repContents = (entries) => `
+  <div class="rep-toc">
+    <h2>Contents</h2>
+    <ol>${entries.map((e) => `<li>${esc(e.title)}<span>${esc(e.note)}</span></li>`).join('')}</ol>
+  </div>`;
 
 async function buildReport(opts) {
-  const sections = opts.scope === 'all'
-    ? ['sales', 'promo', 'lob'].concat(S.scenario ? ['scenario'] : [])
-    : [activeView()].filter((v) => REP_BUILDERS[v]);
+  CTX = null;  // the enterprise report always reads live state
+  const chosen = opts.pages.filter((v) => SECTION_FN[v]);
+  if (!chosen.length) chosen.push('sales');
 
-  if (!sections.length) sections.push('sales');
-
-  // Charts must exist as live canvases before they can be rastered, so make
-  // sure every section being exported has been rendered at least once.
+  // Charts only exist as canvases once their page has rendered, so visit each.
   const current = activeView();
-  for (const v of sections) {
-    if (v !== current) {
-      const btn = $('tabs').querySelector(`button[data-v="${v}"]`);
-      if (btn) { btn.click(); await new Promise((r) => setTimeout(r, 260)); }
-    }
+  for (const v of chosen) {
+    if (v === current) continue;
+    const btn = $('tabs').querySelector(`button[data-v="${v}"]`);
+    if (btn) { btn.click(); await new Promise((r) => setTimeout(r, 280)); }
   }
   const back = $('tabs').querySelector(`button[data-v="${current}"]`);
-  if (back) { back.click(); await new Promise((r) => setTimeout(r, 200)); }
+  if (back) { back.click(); await new Promise((r) => setTimeout(r, 220)); }
 
-  let summary = '';
+  let summaryText = '';
   if (opts.brief) {
     try {
       const r = await api('/api/ai/brief', { method: 'POST', body: JSON.stringify({ filters: filters() }) });
-      summary = `
-        <section class="rep-section">
-          <h2>Executive summary</h2>
-          <div class="rep-card"><div class="rep-prose">${esc(r.text)}</div>
-          <div class="rep-note">Written from the computed figures in this report.</div></div>
-        </section>`;
-    } catch {
-      summary = '';
-    }
+      summaryText = r.text;
+    } catch { summaryText = ''; }
   }
+
+  const titles = chosen.map((v) => REPORT_PAGES[v]);
+  const entries = [{ title: 'Summary', note: 'Headline figures and findings' }]
+    .concat(chosen.map((v) => ({ title: REPORT_PAGES[v], note: '' })))
+    .concat([{ title: 'Method', note: 'How each figure is calculated' }]);
+
+  let n = 0;
+  const body = [
+    secSummary(++n, summaryText),
+    ...chosen.map((v) => SECTION_FN[v](++n)),
+    secMethod(++n)
+  ].join('');
 
   const stamp = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
   $('report').innerHTML =
-    repCover(opts, sections) +
-    summary +
-    sections.map((v) => REP_BUILDERS[v]()).join('') +
-    repMethod() +
-    `<div class="rep-foot">
-       <span>${esc(opts.title)} &middot; ${esc(opts.preparedFor)}</span>
+    repCover(opts, titles) +
+    repContents(entries) +
+    body +
+    `<div class="rep-end">
+       <span>${esc(opts.title)} &middot; prepared for ${esc(opts.preparedFor)}</span>
        <span>Prototype on synthetic data &middot; ${esc(stamp)}</span>
      </div>`;
 }
 
 function openReportDialog() {
   if (!S.analytics) { alert('Load data before exporting a report.'); return; }
+
+  const v = activeView();
+  $('repPages').querySelectorAll('input').forEach((i) => { i.checked = (i.value === v); });
+  if (!$('repPages').querySelector('input:checked')) {
+    $('repPages').querySelector('input[value="sales"]').checked = true;
+  }
+
+  // Installation list comes from the data, so it tracks whatever is loaded.
+  const box = $('repInstalls');
+  if (!box.dataset.filled) {
+    box.innerHTML = (S.meta?.installations || [])
+      .map((n) => `<label><input type="checkbox" value="${esc(n)}" checked> ${esc(n)}</label>`).join('');
+    box.dataset.filled = '1';
+  }
+
   $('reportVeil').hidden = false;
   $('repTitleIn').focus();
 }
 
+function setReportMode(mode) {
+  $('repMode').querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === mode));
+  const pack = mode === 'pack';
+  $('repPackOpts').hidden = !pack;
+  $('repPagesField').hidden = pack;
+  $('repTitleIn').value = pack
+    ? ($('repTitleIn').value.includes('Pack') ? $('repTitleIn').value : 'Installation Performance Pack')
+    : ($('repTitleIn').value === 'Installation Performance Pack' ? 'Revenue Intelligence Review' : $('repTitleIn').value);
+}
+
+const reportMode = () => ($('repMode').querySelector('button.on') || {}).dataset?.mode || 'single';
+
+/** Wait for the print dialog to close before touching the document again. */
+function printAndWait() {
+  return new Promise((resolve) => {
+    const done = () => { window.removeEventListener('afterprint', done); setTimeout(resolve, 220); };
+    window.addEventListener('afterprint', done);
+    setTimeout(() => window.print(), 120);
+  });
+}
+
+function repProgress(msg) {
+  const go = $('repGo');
+  go.textContent = msg;
+}
+
 async function runReportExport() {
   const go = $('repGo');
+  const opts = {
+    title: $('repTitleIn').value.trim() || 'Revenue Intelligence Review',
+    preparedFor: $('repFor').value.trim() || 'MCCS Headquarters',
+    brief: $('repBrief').checked
+  };
+
   go.disabled = true;
-  go.textContent = 'Building';
   try {
-    await buildReport({
-      scope: $('repScope').value,
-      title: $('repTitleIn').value.trim() || 'Revenue Intelligence Review',
-      preparedFor: $('repFor').value.trim() || 'MCCS Headquarters',
-      brief: $('repBrief').checked
-    });
-    $('reportVeil').hidden = true;
-    // Let layout settle before handing over to the print pipeline.
-    setTimeout(() => window.print(), 120);
+    if (reportMode() === 'pack') {
+      const names = [...$('repInstalls').querySelectorAll('input:checked')].map((i) => i.value);
+      if (!names.length) { alert('Choose at least one installation.'); go.disabled = false; return; }
+
+      repProgress(`Building 0 of ${names.length}`);
+      const built = [];
+      let i = 0;
+      for (const name of names) {
+        repProgress(`Building ${++i} of ${names.length}`);
+        const c = await installationContext(name);
+        if (c) built.push({ name, c });
+      }
+      if (!built.length) throw new Error('No data for the installations selected');
+
+      const stamp = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+      const endNote = (t) => `<div class="rep-end">
+          <span>${esc(t)} &middot; prepared for ${esc(opts.preparedFor)}</span>
+          <span>Prototype on synthetic data &middot; ${esc(stamp)}</span>
+        </div>`;
+
+      if ($('repDelivery').value === 'separate') {
+        // One document, one print dialog, one saved file per installation.
+        $('reportVeil').hidden = true;
+        for (let k = 0; k < built.length; k++) {
+          const { name, c } = built[k];
+          document.title = `${opts.title} - ${name}`;
+          $('report').innerHTML =
+            repPackCover({ ...opts, title: `${opts.title}: ${name}` }, [name]) +
+            partInstallation(1, c) +
+            endNote(`${opts.title}: ${name}`);
+          await printAndWait();
+        }
+        document.title = 'MCCS Revenue Intelligence';
+      } else {
+        $('report').innerHTML =
+          repPackCover(opts, built.map((b) => b.name)) +
+          repContents(built.map((b, k) => ({ title: b.name, note: `Part ${k + 1}` }))) +
+          built.map((b, k) => partInstallation(k + 1, b.c)).join('') +
+          endNote(opts.title);
+        $('reportVeil').hidden = true;
+        await printAndWait();
+      }
+      $('report').innerHTML = '';
+      CTX = null;
+    } else {
+      const pages = [...$('repPages').querySelectorAll('input:checked')].map((i) => i.value);
+      if (!pages.length) { alert('Choose at least one page to include.'); go.disabled = false; return; }
+      repProgress('Building');
+      await buildReport({ ...opts, pages });
+      $('reportVeil').hidden = true;
+      await printAndWait();
+      $('report').innerHTML = '';
+    }
   } catch (e) {
     alert(`Could not build the report: ${e.message}`);
   }
   go.disabled = false;
-  go.textContent = 'Build report';
+  repProgress('Build report');
 }
 
 window.addEventListener('afterprint', () => { $('report').innerHTML = ''; });
@@ -1724,6 +1955,11 @@ function wire() {
 
   $('btnExportReport').onclick = openReportDialog;
   $('repCancel').onclick = () => { $('reportVeil').hidden = true; };
+  $('repMode').querySelectorAll('button').forEach((b) => {
+    b.onclick = () => setReportMode(b.dataset.mode);
+  });
+  $('repAllInst').onclick = () => $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = true; });
+  $('repNoInst').onclick = () => $('repInstalls').querySelectorAll('input').forEach((i) => { i.checked = false; });
   $('repGo').onclick = runReportExport;
   $('reportVeil').onclick = (e) => { if (e.target === $('reportVeil')) $('reportVeil').hidden = true; };
   document.addEventListener('keydown', (e) => {
