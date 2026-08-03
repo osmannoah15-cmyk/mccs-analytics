@@ -493,6 +493,36 @@
   </div>
 </div>
 
+<div class="modal-veil" id="delVeil" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="delHeading" style="max-width:430px">
+    <header class="modal-head">
+      <div>
+        <h2 id="delHeading">Delete account</h2>
+        <p id="delWho"></p>
+      </div>
+      <button class="modal-x" id="delClose" aria-label="Close">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="alert err" style="margin-bottom:18px">
+        This cannot be undone. The account loses access immediately and any active session ends.
+      </div>
+      <p class="modal-note" style="max-width:none;margin-bottom:14px">
+        Data the account edited or imported stays exactly as it is, and the change history keeps its record of what was done. Only the account itself is removed.
+      </p>
+      <div class="fieldset">
+        <div class="fieldset-head"><span class="fl">Type <b id="delEmail"></b> to confirm</span></div>
+        <input type="text" id="delConfirm" class="block" autocomplete="off" spellcheck="false">
+      </div>
+    </div>
+    <footer class="modal-foot">
+      <div class="modal-actions" style="margin-left:auto">
+        <button class="btn quiet" id="delCancel">Cancel</button>
+        <button class="btn danger" id="delGo" disabled>Delete account</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
 <div class="modal-veil" id="scopeVeil" hidden>
   <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scopeHeading" style="max-width:460px">
     <header class="modal-head">

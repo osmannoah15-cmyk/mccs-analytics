@@ -71,7 +71,7 @@ async function initSchema() {
       gross_margin    NUMERIC(14,2) NOT NULL DEFAULT 0,
       inventory_units INTEGER,
       source          TEXT NOT NULL DEFAULT 'seed',
-      updated_by      INTEGER REFERENCES users(id),
+      updated_by      INTEGER REFERENCES users(id) ON DELETE SET NULL,
       updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       UNIQUE (period, installation_id, category_id)
     );
@@ -96,7 +96,7 @@ async function initSchema() {
       margin_rate_pct   NUMERIC(6,2) NOT NULL DEFAULT 0,
       incremental_margin NUMERIC(14,2) NOT NULL DEFAULT 0,
       status            TEXT NOT NULL DEFAULT 'active',
-      updated_by        INTEGER REFERENCES users(id),
+      updated_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
       updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
@@ -162,6 +162,29 @@ async function migrate() {
       await q(sql);
     } catch (e) {
       console.warn('migration step skipped:', e.message);
+    }
+  }
+
+  // Deleting an account must not fail because an old edit points at it, and
+  // must not take the edited data with it. These two columns were created
+  // without a delete rule, so an existing database needs them replaced.
+  for (const [table, constraint, column] of [
+    ['sales_fact', 'sales_fact_updated_by_fkey', 'updated_by'],
+    ['campaigns', 'campaigns_updated_by_fkey', 'updated_by']
+  ]) {
+    try {
+      const { rows } = await q(`
+        SELECT confdeltype FROM pg_constraint
+        WHERE conname = $1 AND conrelid = $2::regclass`, [constraint, table]);
+      // 'a' is NO ACTION, the default. 'n' is SET NULL, which is what we want.
+      if (rows.length && rows[0].confdeltype === 'a') {
+        await q(`ALTER TABLE ${table} DROP CONSTRAINT ${constraint}`);
+        await q(`ALTER TABLE ${table} ADD CONSTRAINT ${constraint}
+                 FOREIGN KEY (${column}) REFERENCES users(id) ON DELETE SET NULL`);
+        console.log(`Migrated ${table}.${column} to ON DELETE SET NULL.`);
+      }
+    } catch (e) {
+      console.warn(`could not migrate ${constraint}:`, e.message);
     }
   }
 

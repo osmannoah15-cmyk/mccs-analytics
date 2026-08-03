@@ -1002,7 +1002,12 @@ async function loadUsers() {
           </td>
           <td><span class="chip ${u.is_active ? 'win' : 'lose'}">${u.is_active ? 'active' : 'disabled'}</span></td>
           <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'never'}</td>
-          <td><button class="btn ghost sm" data-toggle>${u.is_active ? 'Disable' : 'Enable'}</button></td>
+          <td class="rowacts">
+            <button class="btn ghost sm" data-toggle>${u.is_active ? 'Disable' : 'Enable'}</button>
+            ${u.id === S.user.id
+              ? '<span class="chip neutral">you</span>'
+              : '<button class="btn ghost sm danger-quiet" data-del>Delete</button>'}
+          </td>
         </tr>`).join('')}</tbody>`;
 
     $('userTbl').querySelectorAll('select[data-role]').forEach((sel) => {
@@ -1012,6 +1017,13 @@ async function loadUsers() {
           await api(`/auth/users/${id}`, { method: 'PATCH', body: JSON.stringify({ role: sel.value }) });
           userMsg('Role updated.', 'ok');
         } catch (e) { userMsg(e.message, 'err'); }
+      };
+    });
+    $('userTbl').querySelectorAll('button[data-del]').forEach((b) => {
+      b.onclick = () => {
+        const tr = b.closest('tr');
+        const u = r.users.find((x) => String(x.id) === tr.dataset.id);
+        openDeleteDialog(u);
       };
     });
     $('userTbl').querySelectorAll('button[data-scope]').forEach((b) => {
@@ -1034,6 +1046,44 @@ async function loadUsers() {
       };
     });
   } catch (e) { userMsg(e.message, 'err'); }
+}
+
+/**
+ * Confirm an account deletion.
+ *
+ * The email has to be typed out. Deletion cannot be undone and the user table
+ * puts rows close together, so a single misplaced click should not be enough.
+ */
+function openDeleteDialog(user) {
+  const veil = $('delVeil');
+  const input = $('delConfirm');
+  const go = $('delGo');
+
+  $('delWho').textContent = user.full_name ? `${user.full_name} (${user.email})` : user.email;
+  $('delEmail').textContent = user.email;
+  input.value = '';
+  go.disabled = true;
+
+  input.oninput = () => { go.disabled = input.value.trim().toLowerCase() !== user.email.toLowerCase(); };
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !go.disabled) go.click(); };
+
+  go.onclick = async () => {
+    go.disabled = true;
+    go.textContent = 'Deleting';
+    try {
+      await api(`/auth/users/${user.id}`, { method: 'DELETE' });
+      veil.hidden = true;
+      userMsg(`${user.email} has been deleted.`, 'ok');
+      loadUsers();
+    } catch (e) {
+      userMsg(e.message, 'err');
+      veil.hidden = true;
+    }
+    go.textContent = 'Delete account';
+  };
+
+  veil.hidden = false;
+  setTimeout(() => input.focus(), 40);
 }
 
 /** Assign which installations an account may see. */
@@ -2055,6 +2105,10 @@ function wire() {
     renderPromo();
   };
 
+  $('delCancel').onclick = () => { $('delVeil').hidden = true; };
+  $('delClose').onclick = () => { $('delVeil').hidden = true; };
+  $('delVeil').onclick = (e) => { if (e.target === $('delVeil')) $('delVeil').hidden = true; };
+
   $('scopeCancel').onclick = () => { $('scopeVeil').hidden = true; };
   $('scopeClose').onclick = () => { $('scopeVeil').hidden = true; };
   $('scopeVeil').onclick = (e) => { if (e.target === $('scopeVeil')) $('scopeVeil').hidden = true; };
@@ -2094,7 +2148,10 @@ function wire() {
   $('repGo').onclick = runReportExport;
   $('reportVeil').onclick = (e) => { if (e.target === $('reportVeil')) $('reportVeil').hidden = true; };
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && !$('reportVeil').hidden) $('reportVeil').hidden = true;
+    if (e.key !== 'Escape') return;
+    ['reportVeil', 'scopeVeil', 'delVeil'].forEach((id) => {
+      const n = $(id); if (n && !n.hidden) n.hidden = true;
+    });
   });
 
   $('btnLogout').onclick = async () => {

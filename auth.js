@@ -2,7 +2,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const rateLimit = require('express-rate-limit');
-const { q } = require('./db');
+const { q, audit } = require('./db');
 
 const router = express.Router();
 
@@ -259,6 +259,57 @@ router.patch('/users/:id', requireApiAuth, requireAdmin, async (req, res) => {
   if (!rows[0]) return res.status(404).json({ error: 'User not found' });
   await invalidateScope(id);
   res.json({ user: rows[0] });
+});
+
+/**
+ * Delete an account.
+ *
+ * Two guards matter here. An administrator must not delete their own account
+ * or the last remaining administrator, either of which would lock everyone out
+ * of user management with no way back in through the interface. Audit and
+ * ai_log rows survive with a null user, so the record of what was done to the
+ * data is not lost along with the account that did it.
+ */
+router.delete('/users/:id', requireApiAuth, requireAdmin, async (req, res, next) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid user id' });
+
+  try {
+    if (id === req.session.user.id) {
+      return res.status(400).json({ error: 'You cannot delete the account you are signed in with' });
+    }
+
+    const target = await q('SELECT id, email, role FROM users WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'User not found' });
+
+    if (target.rows[0].role === 'admin') {
+      const { rows } = await q(
+        `SELECT COUNT(*)::int AS n FROM users WHERE role = 'admin' AND is_active = TRUE AND id <> $1`,
+        [id]
+      );
+      if (rows[0].n === 0) {
+        return res.status(400).json({
+          error: 'This is the last active administrator. Promote another account first.'
+        });
+      }
+    }
+
+    // Recorded before the row disappears, so the trail names who was removed.
+    await audit(req.session.user.id, 'users', id, 'delete',
+      { email: target.rows[0].email, role: target.rows[0].role }, null);
+
+    await invalidateScope(id);            // ends any live session for the account
+    await q('DELETE FROM users WHERE id = $1', [id]);
+
+    res.json({ ok: true, email: target.rows[0].email });
+  } catch (e) {
+    if (e.code === '23503') {
+      return res.status(409).json({
+        error: 'That account is still referenced by other records and could not be removed.'
+      });
+    }
+    next(e);
+  }
 });
 
 router.post('/change-password', requireApiAuth, async (req, res) => {

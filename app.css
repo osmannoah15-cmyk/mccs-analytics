@@ -857,3 +857,12 @@ tr.flash td { animation: flash 1.2s ease-out; }
 .instlist { display: flex; flex-wrap: wrap; gap: 4px; max-width: 260px; }
 .instlist .chip { cursor: default; }
 .instlist .none { color: var(--muted); font-size: 11.5px; }
+
+.rowacts { display: flex; gap: 6px; align-items: center; white-space: nowrap; }
+.btn.danger-quiet {
+  background: var(--surface); color: var(--scarlet); border-color: var(--line); font-weight: 500;
+}
+.btn.danger-quiet:hover { background: var(--scarlet-w); border-color: var(--scarlet); }
+.btn:disabled:hover { background: var(--scarlet); border-color: var(--scarlet); }
+.btn.quiet:disabled:hover { background: var(--surface); }
+#delEmail { font-family: inherit; text-transform: none; letter-spacing: 0; color: var(--ink); }

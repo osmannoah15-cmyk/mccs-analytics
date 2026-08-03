@@ -67,6 +67,12 @@ Enforcement is in the data layer, not the interface. Scope becomes a WHERE claus
 
 Changing an account's access signs that account out, so the new scope takes effect on their next sign-in rather than waiting for a stale session to expire.
 
+**Deleting an account.** Admin, then **Delete** beside the account. The account's email has to be typed to confirm, since deletion cannot be undone and the rows sit close together.
+
+Two deletions are refused: your own account, and the last active administrator. Either would leave nobody able to manage users, with no route back in through the interface.
+
+Data the account edited or imported is untouched, and the change history keeps its record of what was done, with the acting account shown as removed. Only the account itself goes. Any live session for it ends immediately.
+
 **Roles.** Viewer reads the analytics tabs. Analyst additionally sees the Admin tab and can edit data. Admin sees everything there, including data loading, accounts, and the AI call log.
 
 Enterprise objective measures are still computed and remain answerable through the AI analyst, they simply no longer have a dedicated tab.
