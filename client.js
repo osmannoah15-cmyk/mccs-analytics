@@ -13,6 +13,7 @@ const S = {
   promoFilter: { channel: 'all', bl: 'all', inst: 'all', result: 'all' },
   selectedCampaign: null,
   charts: {},
+  scope: null,
   data: { page: 1, pageSize: 50, sort: 'period', dir: 'asc', search: '' },
   scenario: null
 };
@@ -104,6 +105,7 @@ async function boot() {
   try {
     const me = await api('/auth/me');
     S.user = me.user;
+    S.scope = me.scope || null;
     $('userName').textContent = S.user.name;
     $('userRole').textContent = S.user.role;
     $('userInitials').textContent = String(S.user.name || S.user.email)
@@ -112,6 +114,16 @@ async function boot() {
     if (['admin', 'analyst'].includes(S.user.role)) {
       $('tabAdmin').hidden = false;
       $('railAdminLabel').hidden = false;
+    }
+
+    // Say plainly what this account can see, so a partial figure is never
+    // mistaken for an enterprise one.
+    if (S.scope && S.scope.length) {
+      const n = $('scopeNote');
+      n.textContent = S.scope.length === 1
+        ? `Access limited to ${S.scope[0]}`
+        : `Access limited to ${S.scope.length} installations: ${S.scope.join(', ')}`;
+      n.hidden = false;
     }
     if (S.user.role !== 'admin') {
       ['dataStatusCard', 'usersCard', 'aiLogCard'].forEach((id) => {
@@ -968,7 +980,8 @@ async function loadUsers() {
     const r = await api('/auth/users');
     $('userTbl').innerHTML = `
       <thead><tr><th class="plain">Email</th><th class="plain">Name</th><th class="plain">Role</th>
-      <th class="plain">Status</th><th class="plain">Last sign in</th><th class="plain"></th></tr></thead>
+      <th class="plain">Installations</th><th class="plain">Status</th>
+      <th class="plain">Last sign in</th><th class="plain"></th></tr></thead>
       <tbody>${r.users.map((u) => `
         <tr data-id="${u.id}">
           <td class="name">${esc(u.email)}</td>
@@ -978,6 +991,14 @@ async function loadUsers() {
               ${['viewer', 'analyst', 'admin'].map((x) =>
                 `<option value="${x}" ${u.role === x ? 'selected' : ''}>${x}</option>`).join('')}
             </select>
+          </td>
+          <td>
+            ${u.role === 'admin'
+              ? '<span class="instlist"><span class="none">all (administrator)</span></span>'
+              : (u.installations && u.installations.length
+                  ? `<span class="instlist">${u.installations.map((n) => `<span class="chip neutral">${esc(n)}</span>`).join('')}</span>`
+                  : '<span class="instlist"><span class="none">all installations</span></span>')}
+            ${u.role === 'admin' ? '' : '<br><button class="link" data-scope style="margin-top:5px">Change</button>'}
           </td>
           <td><span class="chip ${u.is_active ? 'win' : 'lose'}">${u.is_active ? 'active' : 'disabled'}</span></td>
           <td>${u.last_login_at ? new Date(u.last_login_at).toLocaleString() : 'never'}</td>
@@ -993,6 +1014,13 @@ async function loadUsers() {
         } catch (e) { userMsg(e.message, 'err'); }
       };
     });
+    $('userTbl').querySelectorAll('button[data-scope]').forEach((b) => {
+      b.onclick = () => {
+        const tr = b.closest('tr');
+        const u = r.users.find((x) => String(x.id) === tr.dataset.id);
+        openScopeDialog(u);
+      };
+    });
     $('userTbl').querySelectorAll('button[data-toggle]').forEach((b) => {
       b.onclick = async () => {
         const tr = b.closest('tr');
@@ -1006,6 +1034,52 @@ async function loadUsers() {
       };
     });
   } catch (e) { userMsg(e.message, 'err'); }
+}
+
+/** Assign which installations an account may see. */
+async function openScopeDialog(user) {
+  // The admin's own /api/meta list could itself be filtered, so ask for the
+  // full set rather than assigning from a possibly partial view.
+  let all = S.meta?.installations || [];
+  try {
+    const r = await api('/auth/installations');
+    if (r.installations?.length) all = r.installations;
+  } catch { /* fall back to what is loaded */ }
+
+  const current = new Set(user.installations || []);
+  const veil = $('scopeVeil');
+
+  $('scopeWho').textContent = user.full_name || user.email;
+  $('scopeOpts').innerHTML = all.map((n) => `
+    <label class="opt"><input type="checkbox" value="${esc(n)}" ${current.has(n) ? 'checked' : ''}>
+      <span class="tick"></span><span>${esc(n)}</span></label>`).join('');
+
+  const sync = () => {
+    const on = $('scopeOpts').querySelectorAll('input:checked').length;
+    $('scopeCount').textContent = on
+      ? `${on} of ${all.length} selected`
+      : 'none selected, which grants every installation';
+  };
+  $('scopeOpts').onchange = sync;
+  sync();
+
+  $('scopeSave').onclick = async () => {
+    const names = [...$('scopeOpts').querySelectorAll('input:checked')].map((i) => i.value);
+    $('scopeSave').disabled = true;
+    try {
+      await api(`/auth/users/${user.id}/installations`, {
+        method: 'PUT', body: JSON.stringify({ installations: names })
+      });
+      veil.hidden = true;
+      userMsg(names.length
+        ? `${user.email} now sees ${names.length} installation${names.length > 1 ? 's' : ''}. They will need to sign in again.`
+        : `${user.email} now sees every installation. They will need to sign in again.`, 'ok');
+      loadUsers();
+    } catch (e) { userMsg(e.message, 'err'); }
+    $('scopeSave').disabled = false;
+  };
+
+  veil.hidden = false;
 }
 
 function userMsg(text, kind) {
@@ -1542,6 +1616,7 @@ function repPackCover(opts, names) {
         <tr><th>Date</th><td>${esc(stamp)}</td></tr>
         <tr><th>Installations</th><td>${esc(names.join(', '))}</td></tr>
         <tr><th>Period</th><td>${esc(filterScope().split(', ').pop())}</td></tr>
+        ${S.scope && S.scope.length ? `<tr><th>Access</th><td>Limited to ${esc(S.scope.join(', '))}</td></tr>` : ''}
       </table>
       <div class="rep-notice">
         <b>Prototype on synthetic data.</b> Figures are computed from a representative dataset, not from MCCS systems of record.
@@ -1563,7 +1638,10 @@ function repCover(opts, titles) {
         <tr><th>Prepared for</th><td>${esc(opts.preparedFor)}</td></tr>
         <tr><th>Prepared by</th><td>${esc(S.user.name)}, Dexian Government Solutions</td></tr>
         <tr><th>Date</th><td>${esc(stamp)}</td></tr>
-        <tr><th>Scope</th><td>${esc(filterScope())}</td></tr>
+        <tr><th>Scope</th><td>${esc(filterScope())}${
+          S.scope && S.scope.length
+            ? `<br><b>Access limited to ${esc(S.scope.join(', '))}</b>`
+            : ''}</td></tr>
         <tr><th>Basis</th><td>${num(d.coverage.salesRows)} monthly sales records across ${d.coverage.installations} installations and ${d.coverage.businessLines} lines of business, with ${d.coverage.campaigns} campaigns</td></tr>
       </table>
       <div class="rep-notice">
@@ -1634,6 +1712,8 @@ function openReportDialog() {
   }
 
   // Installation list comes from the data, so it tracks whatever is loaded.
+  // /api/meta only returns installations this account may see, so a restricted
+  // user is offered exactly the bases they are allowed to export.
   const box = $('repInstalls');
   if (!box.dataset.filled) {
     box.innerHTML = (S.meta?.installations || [])
@@ -1973,6 +2053,18 @@ function wire() {
     S.selectedCampaign = null;
     fillPromoFilters();
     renderPromo();
+  };
+
+  $('scopeCancel').onclick = () => { $('scopeVeil').hidden = true; };
+  $('scopeClose').onclick = () => { $('scopeVeil').hidden = true; };
+  $('scopeVeil').onclick = (e) => { if (e.target === $('scopeVeil')) $('scopeVeil').hidden = true; };
+  $('scopeAll').onclick = () => {
+    $('scopeOpts').querySelectorAll('input').forEach((i) => { i.checked = true; });
+    $('scopeOpts').dispatchEvent(new Event('change'));
+  };
+  $('scopeNone').onclick = () => {
+    $('scopeOpts').querySelectorAll('input').forEach((i) => { i.checked = false; });
+    $('scopeOpts').dispatchEvent(new Event('change'));
   };
 
   $('btnLoadData').onclick = () => doLoadData(false);

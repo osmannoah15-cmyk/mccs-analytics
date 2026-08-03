@@ -23,6 +23,46 @@ function requireAuth(req, res, next) {
   return res.status(401).json({ error: 'Not authenticated' });
 }
 
+/**
+ * The installations an account may see, or null for unrestricted.
+ *
+ * Cached on the session so it is not queried on every request, and cleared
+ * whenever an administrator changes it. Enforcement happens in the data layer
+ * rather than the interface: hiding a filter option would not stop anyone
+ * requesting another installation directly.
+ */
+async function scopeFor(req) {
+  if (!req.session?.user) return [];
+  if (req.session.scope !== undefined) return req.session.scope;
+
+  const { rows } = await q(
+    `SELECT i.name FROM user_installations ui
+     JOIN installations i ON i.id = ui.installation_id
+     WHERE ui.user_id = $1 ORDER BY i.name`,
+    [req.session.user.id]
+  );
+  req.session.scope = rows.length ? rows.map((r) => r.name) : null;
+  return req.session.scope;
+}
+
+/** Attaches req.scope so downstream routes can filter without another query. */
+async function withScope(req, _res, next) {
+  try {
+    req.scope = await scopeFor(req);
+    next();
+  } catch (e) { next(e); }
+}
+
+/** Drop the cached scope so the next request re-reads it. */
+async function invalidateScope(userId) {
+  try {
+    await q(`DELETE FROM session WHERE sess::jsonb -> 'user' ->> 'id' = $1`, [String(userId)]);
+  } catch (e) {
+    // Not fatal: the change simply takes effect at the user's next sign-in.
+    console.warn('could not clear sessions for user', userId, e.message);
+  }
+}
+
 /** Gate for API routes: always JSON. */
 function requireApiAuth(req, res, next) {
   if (req.session && req.session.user) return next();
@@ -103,15 +143,63 @@ router.post('/logout', (req, res) => {
   });
 });
 
-router.get('/me', requireApiAuth, (req, res) => res.json({ user: req.session.user }));
+router.get('/me', requireApiAuth, async (req, res, next) => {
+  try {
+    res.json({ user: req.session.user, scope: await scopeFor(req) });
+  } catch (e) { next(e); }
+});
 
 /** Admin-only user management. */
 router.get('/users', requireApiAuth, requireAdmin, async (_req, res) => {
   const { rows } = await q(
-    `SELECT id, email, full_name, role, is_active, created_at, last_login_at
-     FROM users ORDER BY created_at`
+    `SELECT u.id, u.email, u.full_name, u.role, u.is_active, u.created_at, u.last_login_at,
+            COALESCE(
+              ARRAY_AGG(i.name ORDER BY i.name) FILTER (WHERE i.name IS NOT NULL),
+              '{}'
+            ) AS installations
+     FROM users u
+     LEFT JOIN user_installations ui ON ui.user_id = u.id
+     LEFT JOIN installations i ON i.id = ui.installation_id
+     GROUP BY u.id
+     ORDER BY u.created_at`
   );
   res.json({ users: rows });
+});
+
+/** Every installation, for the assignment dialog. Admin only. */
+router.get('/installations', requireApiAuth, requireAdmin, async (_req, res, next) => {
+  try {
+    const { rows } = await q('SELECT name FROM installations ORDER BY name');
+    res.json({ installations: rows.map((r) => r.name) });
+  } catch (e) { next(e); }
+});
+
+/** Replace an account's installation scope. An empty list means unrestricted. */
+router.put('/users/:id/installations', requireApiAuth, requireAdmin, async (req, res, next) => {
+  const id = Number(req.params.id);
+  const names = Array.isArray(req.body.installations) ? req.body.installations : [];
+  try {
+    const target = await q('SELECT id, role FROM users WHERE id = $1', [id]);
+    if (!target.rows[0]) return res.status(404).json({ error: 'User not found' });
+    if (target.rows[0].role === 'admin' && names.length) {
+      return res.status(400).json({
+        error: 'Administrators always see every installation. Change the role first to restrict access.'
+      });
+    }
+
+    await q('DELETE FROM user_installations WHERE user_id = $1', [id]);
+    if (names.length) {
+      const found = await q('SELECT id, name FROM installations WHERE name = ANY($1)', [names]);
+      const unknown = names.filter((n) => !found.rows.some((r) => r.name === n));
+      if (unknown.length) return res.status(400).json({ error: `Unknown installation: ${unknown[0]}` });
+      for (const row of found.rows) {
+        await q('INSERT INTO user_installations (user_id, installation_id) VALUES ($1,$2) ON CONFLICT DO NOTHING',
+          [id, row.id]);
+      }
+    }
+    await invalidateScope(id);
+    res.json({ ok: true, installations: names });
+  } catch (e) { next(e); }
 });
 
 router.post('/users', requireApiAuth, requireAdmin, async (req, res) => {
@@ -147,6 +235,9 @@ router.patch('/users/:id', requireApiAuth, requireAdmin, async (req, res) => {
 
   if (req.body.role && ['admin', 'analyst', 'viewer'].includes(req.body.role)) {
     sets.push(`role = $${i++}`); vals.push(req.body.role);
+    // An administrator with a partial view would be misleading, so promotion
+    // clears any restriction rather than silently keeping it.
+    if (req.body.role === 'admin') await q('DELETE FROM user_installations WHERE user_id = $1', [id]);
   }
   if (typeof req.body.is_active === 'boolean') {
     sets.push(`is_active = $${i++}`); vals.push(req.body.is_active);
@@ -166,6 +257,7 @@ router.patch('/users/:id', requireApiAuth, requireAdmin, async (req, res) => {
     vals
   );
   if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+  await invalidateScope(id);
   res.json({ user: rows[0] });
 });
 
@@ -184,4 +276,4 @@ router.post('/change-password', requireApiAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-module.exports = { router, requireAuth, requireApiAuth, requireAdmin, bootstrapAdmin };
+module.exports = { router, requireAuth, requireApiAuth, requireAdmin, bootstrapAdmin, scopeFor, withScope };

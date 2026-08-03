@@ -5,10 +5,11 @@ const fs = require('fs');
 const path = require('path');
 const { q, audit } = require('./db');
 const M = require('./metrics');
-const { requireApiAuth } = require('./auth');
+const { requireApiAuth, withScope } = require('./auth');
 
 const router = express.Router();
 router.use(requireApiAuth);
+router.use(withScope);
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
@@ -16,12 +17,25 @@ const canWrite = (req) => ['admin', 'analyst'].includes(req.session.user.role);
 const denyReadOnly = (res) => res.status(403).json({ error: 'Your role is read-only' });
 
 /** Shared loader: pulls sales rows with filters applied. */
-async function loadSales(filters = {}) {
+/**
+ * @param {string[]|null} scope  installations the caller may see, null for all
+ *
+ * Scope is applied as a WHERE clause here rather than being filtered out later,
+ * so a restricted account cannot reach another installation's rows by asking
+ * for them directly.
+ */
+async function loadSales(filters = {}, scope = null) {
   const where = [];
   const params = [];
   let i = 1;
 
+  if (scope && scope.length) {
+    where.push(`i.name = ANY($${i++})`); params.push(scope);
+  }
   if (filters.installation && filters.installation !== 'all') {
+    if (scope && scope.length && !scope.includes(filters.installation)) {
+      return [];   // asked for something outside the caller's scope
+    }
     where.push(`i.name = $${i++}`); params.push(filters.installation);
   }
   if (filters.businessLine && filters.businessLine !== 'all') {
@@ -57,11 +71,18 @@ async function loadSales(filters = {}) {
   return rows;
 }
 
-async function loadCampaigns(filters = {}) {
+async function loadCampaigns(filters = {}, scope = null) {
   const where = [];
   const params = [];
   let i = 1;
+  if (scope && scope.length) {
+    // Enterprise-wide campaigns stay visible: they apply to every installation,
+    // including the ones this account can see.
+    where.push(`(installation = ANY($${i++}) OR installation = 'All Installations')`);
+    params.push(scope);
+  }
   if (filters.installation && filters.installation !== 'all') {
+    if (scope && scope.length && !scope.includes(filters.installation)) return [];
     where.push(`(installation = $${i++} OR installation = 'All Installations')`);
     params.push(filters.installation);
   }
@@ -98,10 +119,12 @@ const filtersFrom = (query) => ({
 });
 
 /** ---------- Reference data for the filter controls ---------- */
-router.get('/meta', async (_req, res, next) => {
+router.get('/meta', async (req, res, next) => {
   try {
     const [insts, cats, chans, periods] = await Promise.all([
-      q('SELECT name FROM installations ORDER BY name'),
+      req.scope && req.scope.length
+        ? q('SELECT name FROM installations WHERE name = ANY($1) ORDER BY name', [req.scope])
+        : q('SELECT name FROM installations ORDER BY name'),
       q('SELECT DISTINCT business_line, category FROM categories ORDER BY business_line, category'),
       q('SELECT DISTINCT channel FROM campaigns ORDER BY channel'),
       q(`SELECT TO_CHAR(MIN(period),'YYYY-MM-DD') AS first,
@@ -113,7 +136,8 @@ router.get('/meta', async (_req, res, next) => {
       businessLines: [...new Set(cats.rows.map((r) => r.business_line))],
       categories: cats.rows,
       channels: chans.rows.map((r) => r.channel),
-      coverage: periods.rows[0]
+      coverage: periods.rows[0],
+      scope: req.scope && req.scope.length ? req.scope : null
     });
   } catch (e) { next(e); }
 });
@@ -122,7 +146,7 @@ router.get('/meta', async (_req, res, next) => {
 router.get('/analytics', async (req, res, next) => {
   try {
     const filters = filtersFrom(req.query);
-    const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+    const [sales, camps] = await Promise.all([loadSales(filters, req.scope), loadCampaigns(filters, req.scope)]);
     if (!sales.length) return res.json({ empty: true, filters });
 
     const months = M.monthsOf(sales);
@@ -191,7 +215,7 @@ router.get('/sales', async (req, res, next) => {
     const filters = filtersFrom(req.query);
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(500, Math.max(10, Number(req.query.pageSize) || 50));
-    const rows = await loadSales(filters);
+    const rows = await loadSales(filters, req.scope);
 
     const sortKey = ['period', 'installation', 'business_line', 'category',
       'transactions', 'units_sold', 'revenue', 'cogs', 'gross_margin', 'inventory_units']
@@ -230,6 +254,9 @@ router.post('/sales', async (req, res, next) => {
     if (!period || !installation || !business_line || !category) {
       return res.status(400).json({ error: 'period, installation, business_line and category are required' });
     }
+    if (req.scope && req.scope.length && !req.scope.includes(installation)) {
+      return res.status(403).json({ error: 'That installation is outside your access' });
+    }
     const inst = await q('SELECT id FROM installations WHERE name = $1', [installation]);
     if (!inst.rows[0]) return res.status(400).json({ error: `Unknown installation: ${installation}` });
     const cat = await q('SELECT id FROM categories WHERE business_line = $1 AND category = $2',
@@ -265,10 +292,14 @@ router.patch('/sales/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const before = await q(
-      `SELECT transactions, units_sold, revenue::float8, cogs::float8,
-              gross_margin::float8, inventory_units
-       FROM sales_fact WHERE id = $1`, [id]);
+      `SELECT s.transactions, s.units_sold, s.revenue::float8, s.cogs::float8,
+              s.gross_margin::float8, s.inventory_units, i.name AS installation
+       FROM sales_fact s JOIN installations i ON i.id = s.installation_id
+       WHERE s.id = $1`, [id]);
     if (!before.rows[0]) return res.status(404).json({ error: 'Row not found' });
+    if (req.scope && req.scope.length && !req.scope.includes(before.rows[0].installation)) {
+      return res.status(403).json({ error: 'That record is outside your access' });
+    }
 
     const sets = [];
     const vals = [];
@@ -307,8 +338,13 @@ router.delete('/sales/:id', async (req, res, next) => {
   if (!canWrite(req)) return denyReadOnly(res);
   try {
     const id = Number(req.params.id);
-    const before = await q('SELECT * FROM sales_fact WHERE id = $1', [id]);
+    const before = await q(
+      `SELECT s.*, i.name AS installation FROM sales_fact s
+       JOIN installations i ON i.id = s.installation_id WHERE s.id = $1`, [id]);
     if (!before.rows[0]) return res.status(404).json({ error: 'Row not found' });
+    if (req.scope && req.scope.length && !req.scope.includes(before.rows[0].installation)) {
+      return res.status(403).json({ error: 'That record is outside your access' });
+    }
     await q('DELETE FROM sales_fact WHERE id = $1', [id]);
     await audit(req.session.user.id, 'sales_fact', id, 'delete', before.rows[0], null);
     res.json({ ok: true });
@@ -318,7 +354,7 @@ router.delete('/sales/:id', async (req, res, next) => {
 /** ---------- CSV export ---------- */
 router.get('/sales/export', async (req, res, next) => {
   try {
-    const rows = await loadSales(filtersFrom(req.query));
+    const rows = await loadSales(filtersFrom(req.query), req.scope);
     const header = 'period,installation,business_line,category,transactions,units_sold,revenue,cogs,gross_margin,inventory_units';
     const body = rows.map((r) =>
       [r.period, csvCell(r.installation), csvCell(r.business_line), csvCell(r.category),
@@ -369,6 +405,9 @@ router.post('/sales/import', upload.single('file'), async (req, res, next) => {
       const bl = (cells[idxOf('business_line')] || '').trim();
       const cat = (cells[idxOf('category')] || '').trim();
 
+      if (req.scope && req.scope.length && !req.scope.includes(instName)) {
+        errors.push(`Line ${n + 1}: ${instName} is outside your access`); continue;
+      }
       const instId = instMap.get(instName.toLowerCase());
       const catId = catMap.get(`${bl}|${cat}`.toLowerCase());
       if (!/^\d{4}-\d{2}(-\d{2})?$/.test(period)) { errors.push(`Line ${n + 1}: bad period "${period}"`); continue; }
@@ -433,7 +472,7 @@ function splitCsvLine(line) {
 /** ---------- Campaigns ---------- */
 router.get('/campaigns', async (req, res, next) => {
   try {
-    const rows = await loadCampaigns(filtersFrom(req.query));
+    const rows = await loadCampaigns(filtersFrom(req.query), req.scope);
     const campaigns = rows.map(M.campaignMetrics);
     res.json({ campaigns, channels: M.channelRollup(campaigns) });
   } catch (e) { next(e); }
@@ -445,6 +484,11 @@ router.patch('/campaigns/:id', async (req, res, next) => {
     const id = Number(req.params.id);
     const before = await q('SELECT * FROM campaigns WHERE id = $1', [id]);
     if (!before.rows[0]) return res.status(404).json({ error: 'Campaign not found' });
+    if (req.scope && req.scope.length &&
+        before.rows[0].installation !== 'All Installations' &&
+        !req.scope.includes(before.rows[0].installation)) {
+      return res.status(403).json({ error: 'That campaign is outside your access' });
+    }
 
     const allowed = ['spend', 'markdown_pct', 'baseline_revenue', 'promo_revenue', 'incremental_margin', 'status'];
     const sets = [];
@@ -470,7 +514,7 @@ router.patch('/campaigns/:id', async (req, res, next) => {
 router.post('/scenario', async (req, res, next) => {
   try {
     const filters = filtersFrom(req.body.filters || {});
-    const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+    const [sales, camps] = await Promise.all([loadSales(filters, req.scope), loadCampaigns(filters, req.scope)]);
     if (!sales.length) return res.status(400).json({ error: 'No data for those filters' });
     const months = M.monthsOf(sales);
     const result = M.scenario(sales, months, camps.map(M.campaignMetrics), req.body.params || {});

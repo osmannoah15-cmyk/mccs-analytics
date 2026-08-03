@@ -59,6 +59,14 @@ render.yaml
 
 Every file sits at the repo root. There are no subfolders, so `require` paths are all `./name`. The browser script is named `client.js` rather than `app.js` to keep it clearly separate from the server modules sitting beside it.
 
+**Installation access.** Any non-admin account can be restricted to specific installations. Admin, then **Change** beside the account, then pick their installations. Selecting none leaves the account unrestricted, which is the default, so accounts created before this feature keep working unchanged.
+
+A restricted account sees only its own installations everywhere: the filter dropdown lists only those, every figure is computed from only those rows, the AI analyst is told what it can and cannot see, exports and installation packs offer only those bases, and the report cover states the restriction so an exported PDF is never mistaken for an enterprise view.
+
+Enforcement is in the data layer, not the interface. Scope becomes a WHERE clause on every query, so requesting another installation directly returns nothing rather than being merely hidden. Writes are guarded separately: a restricted account cannot edit, delete, or import rows outside its installations. Administrators always see everything, and promoting an account to administrator clears any restriction rather than silently keeping it.
+
+Changing an account's access signs that account out, so the new scope takes effect on their next sign-in rather than waiting for a stale session to expire.
+
 **Roles.** Viewer reads the analytics tabs. Analyst additionally sees the Admin tab and can edit data. Admin sees everything there, including data loading, accounts, and the AI call log.
 
 Enterprise objective measures are still computed and remain answerable through the AI analyst, they simply no longer have a dedicated tab.

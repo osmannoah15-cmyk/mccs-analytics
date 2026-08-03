@@ -72,6 +72,7 @@
       <div class="titleblock">
         <h1 id="pageTitle">Sales &amp; forecast</h1>
         <p id="coverageLine">Loading data coverage</p>
+        <p class="scope-note" id="scopeNote" hidden></p>
       </div>
       <div class="topfilters">
         <label class="field-inline">
@@ -487,6 +488,35 @@
       <div class="modal-actions">
         <button class="btn quiet" id="repCancel">Cancel</button>
         <button class="btn" id="repGo">Build report</button>
+      </div>
+    </footer>
+  </div>
+</div>
+
+<div class="modal-veil" id="scopeVeil" hidden>
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="scopeHeading" style="max-width:460px">
+    <header class="modal-head">
+      <div>
+        <h2 id="scopeHeading">Installation access</h2>
+        <p id="scopeWho"></p>
+      </div>
+      <button class="modal-x" id="scopeClose" aria-label="Close">&times;</button>
+    </header>
+    <div class="modal-body">
+      <div class="fieldset">
+        <div class="fieldset-head">
+          <span class="fl" id="scopeCount"></span>
+          <span class="fc"><button type="button" class="link" id="scopeAll">All</button><button type="button" class="link" id="scopeNone">None</button></span>
+        </div>
+        <div class="opt-grid" id="scopeOpts"></div>
+      </div>
+      <p class="modal-note">Selecting none grants access to every installation. A restricted account sees only its own installations everywhere in the app, including exports and anything it asks the AI analyst.</p>
+    </div>
+    <footer class="modal-foot">
+      <p class="modal-note">The account will need to sign in again for this to take effect.</p>
+      <div class="modal-actions">
+        <button class="btn quiet" id="scopeCancel">Cancel</button>
+        <button class="btn" id="scopeSave">Save access</button>
       </div>
     </footer>
   </div>

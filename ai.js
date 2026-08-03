@@ -4,11 +4,12 @@ const rateLimit = require('express-rate-limit');
 const { q } = require('./db');
 const M = require('./metrics');
 const sage = require('./asksage');
-const { requireApiAuth } = require('./auth');
+const { requireApiAuth, withScope } = require('./auth');
 const { loadSales, loadCampaigns, filtersFrom } = require('./api');
 
 const router = express.Router();
 router.use(requireApiAuth);
+router.use(withScope);
 
 router.use(rateLimit({
   windowMs: 60 * 1000,
@@ -30,6 +31,8 @@ Hard rules:
 - Refer to money in the same rounded form the payload uses.
 - Do not use em dashes anywhere in your output.
 - Never claim data is real. This is a synthetic prototype dataset.
+
+Scope: if the payload covers only some installations, describe it as those installations rather than as MCCS as a whole, and do not speculate about installations that are absent.
 
 Framing: MCCS measures itself against three enterprise objectives (leadership embrace, patron relevancy, resource efficiency) and four lines of effort (LOE 1 Innovate for Relevancy, LOE 2 Tell Our Story, LOE 3 Collaborate Effectively, LOE 4 Measure What Matters). When it is genuinely relevant, connect a finding to the objective or line of effort it informs. Do not force the connection.`;
 
@@ -68,9 +71,9 @@ async function runAi({ req, kind, prompt, fallback }) {
   }
 }
 
-async function digestFor(query) {
+async function digestFor(query, scope = null) {
   const filters = filtersFrom(query || {});
-  const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+  const [sales, camps] = await Promise.all([loadSales(filters, scope), loadCampaigns(filters, scope)]);
   if (!sales.length) return null;
   return M.buildDigest(sales, camps, filters);
 }
@@ -78,7 +81,7 @@ async function digestFor(query) {
 /** ---------- Executive briefing ---------- */
 router.post('/brief', async (req, res, next) => {
   try {
-    const d = await digestFor(req.body.filters);
+    const d = await digestFor(req.body.filters, req.scope);
     if (!d) return res.status(400).json({ error: 'No data for those filters' });
 
     const prompt = `Write an executive briefing in five short paragraphs covering, in order:
@@ -105,7 +108,7 @@ router.post('/ask', async (req, res, next) => {
     if (!question) return res.status(400).json({ error: 'A question is required' });
     if (question.length > 800) return res.status(400).json({ error: 'Question is too long' });
 
-    const d = await digestFor(req.body.filters);
+    const d = await digestFor(req.body.filters, req.scope);
     if (!d) return res.status(400).json({ error: 'No data for those filters' });
 
     const prompt = `Answer the question below using only these metrics. Two to four sentences. Quote the specific figures that support the answer.
@@ -127,9 +130,14 @@ router.post('/campaign/:id', async (req, res, next) => {
   try {
     const { rows } = await q('SELECT * FROM campaigns WHERE id = $1', [Number(req.params.id)]);
     if (!rows[0]) return res.status(404).json({ error: 'Campaign not found' });
+    if (req.scope && req.scope.length &&
+        rows[0].installation !== 'All Installations' &&
+        !req.scope.includes(rows[0].installation)) {
+      return res.status(403).json({ error: 'That campaign is outside your access' });
+    }
 
     const c = M.campaignMetrics(rows[0]);
-    const all = (await loadCampaigns({})).map(M.campaignMetrics);
+    const all = (await loadCampaigns({}, req.scope)).map(M.campaignMetrics);
     const channels = M.channelRollup(all);
     const peer = channels.find((x) => x.channel === c.channel);
     const best = channels[channels.length - 1];
@@ -156,7 +164,7 @@ Best channel overall: ${JSON.stringify(best, null, 1)}`;
 /** ---------- Anomaly narrative ---------- */
 router.post('/anomalies', async (req, res, next) => {
   try {
-    const d = await digestFor(req.body.filters);
+    const d = await digestFor(req.body.filters, req.scope);
     if (!d) return res.status(400).json({ error: 'No data for those filters' });
     if (!d.anomalies.length) return res.json({ text: 'No month over month movements exceeded two standard deviations in this selection.', engine: 'builtin' });
 
@@ -179,7 +187,7 @@ Seasonal context, monthly index: ${JSON.stringify(d.forecast, null, 1)}`;
 router.post('/scenario', async (req, res, next) => {
   try {
     const filters = filtersFrom(req.body.filters || {});
-    const [sales, camps] = await Promise.all([loadSales(filters), loadCampaigns(filters)]);
+    const [sales, camps] = await Promise.all([loadSales(filters, req.scope), loadCampaigns(filters, req.scope)]);
     if (!sales.length) return res.status(400).json({ error: 'No data for those filters' });
 
     const months = M.monthsOf(sales);

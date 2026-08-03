@@ -49,6 +49,16 @@ async function initSchema() {
       UNIQUE (business_line, category)
     );
 
+    -- Which installations an account may see. No rows for a user means
+    -- unrestricted, so accounts created before this existed are unaffected.
+    CREATE TABLE IF NOT EXISTS user_installations (
+      user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      installation_id INTEGER NOT NULL REFERENCES installations(id) ON DELETE CASCADE,
+      PRIMARY KEY (user_id, installation_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_user_inst ON user_installations(user_id);
+
     CREATE TABLE IF NOT EXISTS sales_fact (
       id              SERIAL PRIMARY KEY,
       period          DATE NOT NULL,
